@@ -1,0 +1,23 @@
+{
+  "name": "tile-server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "stop": "lsof -ti:8080 | xargs kill -9 2>/dev/null && echo 'Server stopped' || echo 'No server running on port 8080'",
+    "restart": "npm run stop && npm start",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "canvas": "^3.2.1",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "multer": "^2.1.1",
+    "pdfjs-dist": "^5.5.207",
+    "sharp": "^0.34.5"
+  }
+}
