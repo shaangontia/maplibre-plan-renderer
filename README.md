@@ -1,6 +1,6 @@
 # MapLibre 2D Plan Viewer
 
-A mobile app for viewing geo-referenced floor plans on a real-world map with defect pinning, area marking, and measurement tools. Plans are loaded as **GeoPDFs** — the server extracts geo-reference metadata and renders them to PNG automatically.
+A mobile app for viewing geo-referenced floor plans on a real-world map with defect pinning, area marking, measurement tools, and annotation export/import. Plans are loaded as **GeoPDFs** — the server extracts geo-reference metadata and serves pre-rendered PNGs for optimal quality.
 
 ## Architecture
 
@@ -12,16 +12,17 @@ A mobile app for viewing geo-referenced floor plans on a real-world map with def
 │  plan-viewer/            │       │  tile-server/                  │
 │    app/(tabs)/           │       │    index.js        — main API  │
 │      index.tsx           │       │    plans.json      — local DB  │
-│      plan-viewer/        │       │    plans/images/   — GeoPDFs   │
+│      plan-viewer/        │       │    plans/images/   — GeoPDFs+PNGs│
 │        types.ts          │       │    generate-geopdf.js          │
 │        constants.ts      │       │                                │
 │        geoUtils.ts       │       │  Pipeline:                     │
-│        useAnnotations.ts │       │    PDF → extract GEO: metadata │
-│        usePlanData.ts    │       │    PDF → render page to PNG    │
+│        useAnnotations.ts │       │    Canvas → PNG (pixel-perfect)│
+│        usePlanData.ts    │       │    PNG → embed into PDF        │
+│        useExportImport.ts│       │    PDF → extract GEO: metadata │
 │        MapLayers.tsx     │       │    PNG → serve to MapLibre     │
 │        ToolBar.tsx       │       │                                │
 │        PlanDropdown.tsx  │       │  Endpoints:                    │
-│        BottomPanels.tsx  │       │    /style.json                 │
+│        BottomPanels.tsx  │       │    /style.json?mode=canvas     │
 │                          │       │    /plan-info                  │
 └─────────────────────────┘       │    /api/plans (CRUD + upload)  │
                                    │    /api/plans/:id/calibrate    │
@@ -33,13 +34,13 @@ A mobile app for viewing geo-referenced floor plans on a real-world map with def
 
 ### How It Works
 
-The server loads **geospatial PDFs** — not plain images. Each PDF embeds geo-reference metadata in its Keywords field:
+The server generates **high-quality GeoPDFs** with pixel-perfect rendering. The pipeline uses node-canvas for detailed architectural drawing, then embeds the PNG into a PDF with geo-reference metadata:
 
 ```
-GeoPDF Upload → Extract GEO: metadata → Render PDF→PNG → Store corners in DB → Serve to MapLibre
+Canvas 2D API → PNG (pixel-perfect) → Embed in PDFKit PDF with GEO: metadata → Store both files
 ```
 
-On first startup with an empty database, the server scans `plans/images/` for `.pdf` files, extracts their geo-reference metadata, renders them to high-resolution PNGs, and populates `plans.json` automatically.
+On startup, the server scans `plans/images/` for `.pdf` files, extracts geo-reference metadata from the PDF Keywords, and serves the pre-rendered companion PNG to MapLibre for optimal quality.
 
 ### GeoPDF Metadata Format
 
@@ -51,18 +52,41 @@ GEO:BOTTOMRIGHT=-0.0854,51.5208; GEO:BOTTOMLEFT=-0.0874,51.5208;
 GEO:FLOOR=Level 1; GEO:BUILDING=Innovation Centre; GEO:SITE=10 Finsbury Square
 ```
 
-This is extracted using `pdfjs-dist` and the PDF page is rendered to PNG via `node-canvas`.
+### Canvas Mode
+
+The app supports three view modes:
+- **Map** — OpenStreetMap basemap + floor plan overlay
+- **Satellite** — Esri satellite basemap + floor plan overlay  
+- **Canvas** — Floor plan only (no basemap)
+
+Canvas mode (`/style.json?mode=canvas`) skips basemap tiles entirely, showing only the geo-referenced floor plans.
 
 ### Extraction Priority (on upload via POST /api/plans)
 
 | Priority | Method | Trigger | What Happens |
 |----------|--------|---------|--------------|
-| 1 | **GeoPDF** | `.pdf` upload | Reads `GEO:` metadata from PDF Keywords, renders page to PNG |
+| 1 | **GeoPDF** | `.pdf` upload | Reads `GEO:` metadata from PDF Keywords, prefers companion PNG, falls back to pdfjs-dist rendering |
 | 2 | **GeoTIFF** | `.tif`/`.tiff` upload | Reads affine transform + CRS from TIFF tags. Auto-reprojects to WGS84 |
 | 3 | **World File** | `.pgw`/`.tfw`/`.jgw` sidecar | Parses 6 affine parameters → computes corners |
 | 4 | **Explicit corners** | `corners` in request body | Direct override — for BIM/CAD exports |
 | 5 | **Center + dimensions** | `centerLon/Lat` + `widthMeters/heightMeters` | Convenience fallback |
 | 6 | **Uncalibrated** | None of the above | Plan saved with `[0,0]` corners — calibrate later via `/calibrate` |
+
+### Export/Import Annotations
+
+The app supports exporting and importing all annotations (pins, areas, measurements) as JSON:
+
+**Export:**
+- Tap **📤 Export** in header
+- Downloads JSON file with plan metadata and all annotations
+- Format: `{ version, exportedAt, planId, planName, annotations: { defects, polygons, measurements } }`
+
+**Import:**
+- Tap **📥 Import** in header  
+- Select previously exported JSON file
+- Shows preview: pin count, area count, measurement count, source plan, export timestamp
+- Replaces current annotations with imported data
+- Works on both iOS (share sheet) and web (file picker)
 
 ### Upload Examples
 
@@ -111,6 +135,7 @@ The React Native app is split into focused modules under `app/(tabs)/plan-viewer
 | `geoUtils.ts` | Haversine distance, polygon area, formatting, centroid, uid |
 | `useAnnotations.ts` | Hook: annotation state + AsyncStorage persistence per plan |
 | `usePlanData.ts` | Hook: fetches plan data from server, manages active plan |
+| `useExportImport.ts` | Hook: export/import annotations as JSON (web download, mobile share) |
 | `MapLayers.tsx` | All MapLibreGL ShapeSource + Layer components (GeoJSON) |
 | `ToolBar.tsx` | Tool mode selector, severity dots, drawing bar |
 | `PlanDropdown.tsx` | Plan selector dropdown with modal |
@@ -144,12 +169,13 @@ npx expo run:ios    # or npx expo run:android
 
 ## Features
 
-- **GeoPDF loading** — PDFs with embedded geo-reference metadata, auto-rendered to PNG
-- **Map + Satellite toggle** — OSM and Esri satellite basemaps
+- **GeoPDF loading** — PDFs with embedded geo-reference metadata, pixel-perfect Canvas rendering
+- **Three view modes** — Map (OSM), Satellite (Esri), Canvas (plan-only, no basemap)
 - **Floor plan overlay** — Geo-referenced image overlay with configurable opacity
 - **Auto geo-reference extraction** — GeoPDF, GeoTIFF, world file, or manual calibration
 - **Plan dropdown** — Switch between multiple plans (London, Berlin, Paris)
 - **Per-plan persistence** — Pins, areas, measurements saved to device per plan (AsyncStorage)
+- **Export/Import annotations** — JSON export/import of all pins, areas, and measurements
 - **Defect pinning** — Tap to place severity-coded defect markers
 - **Area marking** — Draw polygons, auto-calculates area (m²) and perimeter
 - **Measurement tool** — Tap two points to measure distance (haversine formula)
