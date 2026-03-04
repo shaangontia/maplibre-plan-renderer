@@ -1,16 +1,17 @@
 # Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
 
 # dependencies
-node_modules/
+plan-viewer/node_modules/
+tile-server/node_modules/
 
 # Expo
-.expo/
-dist/
-web-build/
-expo-env.d.ts
+plan-viewer/.expo/
+plan-viewer/dist/
+plan-viewer/web-build/
+plan-viewer/expo-env.d.ts
 
 # Native
-.kotlin/
+plan-viewer/.kotlin/
 *.orig.*
 *.jks
 *.p8
@@ -19,7 +20,7 @@ expo-env.d.ts
 *.mobileprovision
 
 # Metro
-.metro-health-check*
+plan-viewer/.metro-health-check*
 
 # debug
 npm-debug.*
@@ -39,5 +40,5 @@ yarn-error.*
 app-example
 
 # generated native folders
-/ios
-/android
+plan-viewer/ios
+plan-viewer/android
