@@ -189,6 +189,115 @@ async function extractGeoTIFFCorners(filePath) {
 }
 
 // ---------------------------------------------------------------------------
+// Geo-reference extraction: GeoPDF
+// ---------------------------------------------------------------------------
+// Reads geo-reference metadata from PDF Keywords field.
+// Expected format in Keywords:
+//   GEO:CRS=EPSG:4326; GEO:TOPLEFT=lon,lat; GEO:TOPRIGHT=lon,lat; ...
+// Returns { corners, crs, metadata } or null
+let _pdfjsLib = null;
+async function loadPdfjs() {
+  if (!_pdfjsLib) _pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  return _pdfjsLib;
+}
+
+async function extractGeoPDFCorners(filePath) {
+  try {
+    const pdfjsLib = await loadPdfjs();
+    const buf = fs.readFileSync(filePath);
+    const uint8 = new Uint8Array(buf);
+    const doc = await pdfjsLib.getDocument({ data: uint8 }).promise;
+    const meta = await doc.getMetadata();
+
+    // Look for geo-reference in Keywords
+    const keywords = meta?.info?.Keywords || "";
+    if (!keywords.includes("GEO:")) {
+      return null;
+    }
+
+    // Parse GEO: tags from Keywords
+    const geoData = {};
+    const parts = keywords.split(";").map((s) => s.trim());
+    for (const part of parts) {
+      const match = part.match(/^GEO:(\w+)=(.+)$/);
+      if (match) {
+        geoData[match[1]] = match[2].trim();
+      }
+    }
+
+    if (!geoData.TOPLEFT || !geoData.TOPRIGHT || !geoData.BOTTOMRIGHT || !geoData.BOTTOMLEFT) {
+      console.log("GeoPDF: found GEO: tags but missing corner coordinates");
+      return null;
+    }
+
+    const parseCoord = (s) => s.split(",").map(Number);
+    const corners = {
+      topLeft: parseCoord(geoData.TOPLEFT),
+      topRight: parseCoord(geoData.TOPRIGHT),
+      bottomRight: parseCoord(geoData.BOTTOMRIGHT),
+      bottomLeft: parseCoord(geoData.BOTTOMLEFT),
+    };
+
+    const crs = geoData.CRS || "EPSG:4326";
+
+    console.log(`GeoPDF: extracted corners from ${path.basename(filePath)}`);
+    console.log(`  CRS: ${crs}`);
+    console.log(`  TL: [${corners.topLeft}], BR: [${corners.bottomRight}]`);
+
+    // Also extract optional metadata
+    const pdfMeta = {
+      floor: geoData.FLOOR || "",
+      building: geoData.BUILDING || "",
+      site: geoData.SITE || "",
+      title: meta?.info?.Title || "",
+    };
+
+    return { corners, crs, metadata: pdfMeta };
+  } catch (err) {
+    console.warn("GeoPDF extraction error:", err.message);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// PDF → PNG rendering (using pdfjs-dist + node-canvas)
+// ---------------------------------------------------------------------------
+// Renders the first page of a PDF to a high-resolution PNG.
+// Returns the path to the generated PNG, or null on failure.
+async function renderPDFtoPNG(pdfPath, outputPngPath, scale = 3) {
+  try {
+    const pdfjsLib = await loadPdfjs();
+    const { createCanvas } = require("canvas");
+
+    const buf = fs.readFileSync(pdfPath);
+    const uint8 = new Uint8Array(buf);
+    const doc = await pdfjsLib.getDocument({ data: uint8 }).promise;
+    const page = await doc.getPage(1);
+
+    const viewport = page.getViewport({ scale });
+    const canvas = createCanvas(viewport.width, viewport.height);
+    const ctx = canvas.getContext("2d");
+
+    // pdfjs-dist expects a browser-like canvas context
+    // node-canvas is compatible with the legacy build
+    await page.render({
+      canvasContext: ctx,
+      viewport,
+    }).promise;
+
+    // Write PNG
+    const pngBuf = canvas.toBuffer("image/png");
+    fs.writeFileSync(outputPngPath, pngBuf);
+
+    console.log(`PDF→PNG: rendered ${path.basename(pdfPath)} → ${path.basename(outputPngPath)} (${viewport.width}x${viewport.height}px)`);
+    return outputPngPath;
+  } catch (err) {
+    console.error("PDF→PNG render error:", err.message);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Geo-reference extraction: World file (.pgw / .tfw / .jgw / .wld)
 // ---------------------------------------------------------------------------
 // A world file contains 6 lines:
@@ -287,10 +396,47 @@ async function getImageDimensions(filePath) {
 // ---------------------------------------------------------------------------
 // Master geo-reference extraction: tries all methods in order
 // ---------------------------------------------------------------------------
-// Returns { corners, crs, calibrationMethod } or null
+// Returns { corners, crs, calibrationMethod, renderedImagePath?, metadata? } or null
 async function autoExtractGeoReference(imagePath, worldFilePath) {
-  // 1. Try GeoTIFF (for .tif/.tiff files)
   const ext = path.extname(imagePath).toLowerCase();
+
+  // 1. Try GeoPDF (for .pdf files)
+  if (ext === ".pdf") {
+    const result = await extractGeoPDFCorners(imagePath);
+    const pngFilename = path.basename(imagePath, ext) + ".png";
+    const pngPath = path.join(path.dirname(imagePath), pngFilename);
+
+    // Prefer pre-rendered companion PNG (pixel-perfect from node-canvas)
+    // Only fall back to pdfjs-dist rendering if no companion PNG exists
+    let rendered;
+    if (fs.existsSync(pngPath)) {
+      console.log(`PDF→PNG: using pre-rendered companion ${pngFilename}`);
+      rendered = pngPath;
+    } else {
+      rendered = await renderPDFtoPNG(imagePath, pngPath);
+    }
+
+    if (result) {
+      return {
+        corners: result.corners,
+        crs: result.crs,
+        calibrationMethod: "geopdf",
+        metadata: result.metadata,
+        renderedImagePath: rendered ? pngFilename : null,
+      };
+    }
+    // PDF without geo-ref — still return the rendered PNG path
+    if (rendered) {
+      return {
+        corners: null,
+        crs: "EPSG:4326",
+        calibrationMethod: "uncalibrated",
+        renderedImagePath: pngFilename,
+      };
+    }
+  }
+
+  // 2. Try GeoTIFF (for .tif/.tiff files)
   if (ext === ".tif" || ext === ".tiff") {
     const result = await extractGeoTIFFCorners(imagePath);
     if (result) {
@@ -302,7 +448,7 @@ async function autoExtractGeoReference(imagePath, worldFilePath) {
     }
   }
 
-  // 2. Try world file (uploaded separately or found as sidecar)
+  // 3. Try world file (uploaded separately or found as sidecar)
   const wfPath = worldFilePath || findWorldFile(imagePath);
   if (wfPath && fs.existsSync(wfPath)) {
     const content = fs.readFileSync(wfPath, "utf-8");
@@ -310,8 +456,6 @@ async function autoExtractGeoReference(imagePath, worldFilePath) {
     if (wf) {
       const dims = await getImageDimensions(imagePath);
       if (dims) {
-        // Default to EPSG:4326 — in production, the CRS would be
-        // specified in the upload or detected from a .prj sidecar
         const corners = worldFileToCorners(wf, dims.width, dims.height, "EPSG:4326");
         console.log(`World file: extracted corners from ${path.basename(wfPath)}`);
         return {
@@ -323,7 +467,7 @@ async function autoExtractGeoReference(imagePath, worldFilePath) {
     }
   }
 
-  // 3. No geo-reference found — returns null (plan is "uncalibrated")
+  // 4. No geo-reference found — returns null (plan is "uncalibrated")
   return null;
 }
 
@@ -366,49 +510,65 @@ function metersToCorners(centerLon, centerLat, widthM, heightM, rotationDeg) {
 }
 
 // ---------------------------------------------------------------------------
-// Seed default plan — 10 Finsbury Square, London
+// Seed plans from GeoPDFs
 // ---------------------------------------------------------------------------
-// These coordinates were derived from the actual building footprint on
-// OpenStreetMap. In a real app, they would come from a GeoTIFF, a BIM
-// model export, or manual surveyor calibration.
-//
-// Building: 10 Finsbury Square, London EC2A 1AF
-// The building runs roughly NW-SE along the west side of Finsbury Square.
-function seedDefaultPlan() {
+// On first run (empty DB), scans the images directory for .pdf files,
+// extracts geo-reference metadata, renders each to PNG, and saves to DB.
+// This is the production-like flow: PDFs carry their own coordinates.
+async function seedFromGeoPDFs() {
   const plans = readDb();
-  if (plans.length > 0) return;
+  if (plans.length > 0) return; // DB already has plans
 
-  const defaultImg = path.join(PLANS_DIR, "floor_plan.png");
-  if (!fs.existsSync(defaultImg)) return;
+  const pdfFiles = fs.readdirSync(UPLOADS_DIR).filter((f) =>
+    f.toLowerCase().endsWith(".pdf")
+  );
+  if (pdfFiles.length === 0) {
+    console.log("No GeoPDFs found in images directory to seed.");
+    return;
+  }
 
-  const filename = "default_floor_plan.png";
-  const dest = path.join(UPLOADS_DIR, filename);
-  if (!fs.existsSync(dest)) fs.copyFileSync(defaultImg, dest);
+  console.log(`\nSeeding ${pdfFiles.length} plans from GeoPDFs...`);
+  const seeded = [];
 
-  // Precise corners for 10 Finsbury Square building footprint
-  // Derived from OSM building outline: way 20907970
-  const defaultPlan = {
-    id: crypto.randomUUID(),
-    name: "Innovation Centre - Level 1",
-    imagePath: filename,
-    corners: {
-      topLeft:     [-0.08790, 51.52145],  // NW corner of building
-      topRight:    [-0.08600, 51.52145],  // NE corner
-      bottomRight: [-0.08600, 51.52085],  // SE corner
-      bottomLeft:  [-0.08790, 51.52085],  // SW corner
-    },
-    opacity: 0.85,
-    rotation: 0,
-    floor: "Level 1",
-    building: "Innovation Centre",
-    site: "10 Finsbury Square, London EC2A 1AF",
-    crs: "EPSG:4326",
-    calibrationMethod: "manual",
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-  writeDb([defaultPlan]);
-  console.log(`Seeded default plan: ${defaultPlan.name}`);
+  for (const pdfFile of pdfFiles) {
+    const pdfPath = path.join(UPLOADS_DIR, pdfFile);
+    try {
+      const extracted = await autoExtractGeoReference(pdfPath, null);
+      if (!extracted) {
+        console.warn(`  Skipped ${pdfFile}: no geo-reference found`);
+        continue;
+      }
+
+      const meta = extracted.metadata || {};
+      const plan = {
+        id: crypto.randomUUID(),
+        name: meta.title || path.basename(pdfFile, ".pdf"),
+        imagePath: extracted.renderedImagePath || pdfFile,
+        pdfPath: pdfFile,
+        corners: extracted.corners || { topLeft: [0,0], topRight: [0,0], bottomRight: [0,0], bottomLeft: [0,0] },
+        opacity: 0.85,
+        rotation: 0,
+        floor: meta.floor || "",
+        building: meta.building || "",
+        site: meta.site || "",
+        crs: extracted.crs || "EPSG:4326",
+        calibrationMethod: extracted.calibrationMethod,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      seeded.push(plan);
+      const center = getCenter(plan);
+      console.log(`  Seeded: ${plan.name} [${plan.calibrationMethod}] at [${center[0].toFixed(5)}, ${center[1].toFixed(5)}]`);
+    } catch (err) {
+      console.error(`  Error processing ${pdfFile}:`, err.message);
+    }
+  }
+
+  if (seeded.length > 0) {
+    writeDb(seeded);
+    console.log(`\nSeeded ${seeded.length} plans from GeoPDFs.\n`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -439,14 +599,15 @@ app.get("/api/plans/:id", (req, res) => {
 // POST /api/plans — create plan with AUTO geo-reference extraction
 //
 // The server automatically tries to extract coordinates from the file:
-//   1. GeoTIFF → reads affine transform + CRS from TIFF tags
-//   2. World file sidecar → parses 6 affine parameters
-//   3. Manual corners in request body → direct override
-//   4. Center + dimensions → convenience fallback
-//   5. None of the above → plan saved as "uncalibrated"
+//   1. GeoPDF → reads GEO: metadata, renders PDF page to PNG
+//   2. GeoTIFF → reads affine transform + CRS from TIFF tags
+//   3. World file sidecar → parses 6 affine parameters
+//   4. Manual corners in request body → direct override
+//   5. Center + dimensions → convenience fallback
+//   6. None of the above → plan saved as "uncalibrated"
 //
 // Upload fields:
-//   image: the plan file (required) — PNG, JPEG, TIFF/GeoTIFF
+//   image: the plan file (required) — PDF, PNG, JPEG, TIFF/GeoTIFF
 //   worldfile: optional .pgw/.tfw/.jgw sidecar file
 //   name: plan name (required)
 //   corners: JSON override (optional)
@@ -457,15 +618,14 @@ app.post("/api/plans", uploadFields, async (req, res) => {
     return res.status(400).json({ error: "Image file is required (field: 'image')" });
   }
 
-  const { name, opacity, floor, building, site, rotation } = req.body;
-  if (!name) {
-    fs.unlinkSync(imageFile.path);
-    return res.status(400).json({ error: "name is required" });
-  }
+  let { name, opacity, floor, building, site, rotation } = req.body;
 
   let corners = null;
   let calibrationMethod = "uncalibrated";
   let detectedCRS = "EPSG:4326";
+  let resolvedImagePath = imageFile.filename; // may change if PDF is rendered to PNG
+  let pdfSourcePath = null; // keep reference to original PDF
+  let extractedMeta = null;
 
   // Priority 1: Explicit corners in request body
   if (req.body.corners) {
@@ -485,15 +645,23 @@ app.post("/api/plans", uploadFields, async (req, res) => {
     }
   }
 
-  // Priority 2: Auto-extract from file (GeoTIFF or world file)
+  // Priority 2: Auto-extract from file (GeoPDF, GeoTIFF, or world file)
   if (!corners) {
     const worldFilePath = req.files?.worldfile?.[0]?.path || null;
     try {
       const extracted = await autoExtractGeoReference(imageFile.path, worldFilePath);
       if (extracted) {
-        corners = extracted.corners;
+        if (extracted.corners) corners = extracted.corners;
         calibrationMethod = extracted.calibrationMethod;
         detectedCRS = extracted.crs;
+        extractedMeta = extracted.metadata || null;
+
+        // If PDF was rendered to PNG, use the PNG as the image path
+        if (extracted.renderedImagePath) {
+          pdfSourcePath = imageFile.filename;
+          resolvedImagePath = extracted.renderedImagePath;
+        }
+
         console.log(`Auto-extracted geo-reference: method=${calibrationMethod}, crs=${detectedCRS}`);
       }
     } catch (err) {
@@ -514,20 +682,34 @@ app.post("/api/plans", uploadFields, async (req, res) => {
   }
 
   // Priority 4: No geo-reference — save as uncalibrated
-  // The user can calibrate later via PUT or /calibrate endpoint
   if (!corners) {
     corners = {
       topLeft: [0, 0], topRight: [0, 0],
       bottomRight: [0, 0], bottomLeft: [0, 0],
     };
-    calibrationMethod = "uncalibrated";
-    console.log(`Plan "${name}" saved as UNCALIBRATED — use PUT or /calibrate to set corners`);
+    if (calibrationMethod === "uncalibrated") {
+      console.log(`Plan "${name || "unnamed"}" saved as UNCALIBRATED — use PUT or /calibrate to set corners`);
+    }
+  }
+
+  // Use metadata from GeoPDF if fields not provided in request
+  if (extractedMeta) {
+    if (!name && extractedMeta.title) name = extractedMeta.title;
+    if (!floor && extractedMeta.floor) floor = extractedMeta.floor;
+    if (!building && extractedMeta.building) building = extractedMeta.building;
+    if (!site && extractedMeta.site) site = extractedMeta.site;
+  }
+
+  if (!name) {
+    fs.unlinkSync(imageFile.path);
+    return res.status(400).json({ error: "name is required (not found in PDF metadata either)" });
   }
 
   const plan = {
     id: crypto.randomUUID(),
     name,
-    imagePath: imageFile.filename,
+    imagePath: resolvedImagePath,
+    pdfPath: pdfSourcePath || null, // keep reference to original PDF
     corners,
     opacity: opacity ? parseFloat(opacity) : 0.85,
     rotation: parseFloat(rotation || 0),
@@ -700,7 +882,7 @@ app.get("/proxy/satellite/:z/:x/:y", (req, res) => {
 
 // ---------------------------------------------------------------------------
 // Dynamic style.json — uses corners directly for image source coordinates
-// GET /style.json?mode=normal|satellite
+// GET /style.json?mode=normal|satellite|canvas
 // ---------------------------------------------------------------------------
 app.get("/style.json", (req, res) => {
   const host = req.headers.host || `localhost:${PORT}`;
@@ -708,29 +890,34 @@ app.get("/style.json", (req, res) => {
   const mode = req.query.mode || "normal";
   const plans = readDb();
 
-  let basemapSource, basemapLayer;
-  if (mode === "satellite") {
-    basemapSource = {
-      type: "raster",
-      tiles: [`${baseUrl}/proxy/satellite/{z}/{x}/{y}`],
-      tileSize: 256,
-      maxzoom: 19,
-      attribution: "Esri, Maxar, Earthstar Geographics",
-    };
-    basemapLayer = { id: "satellite", type: "raster", source: "basemap" };
-  } else {
-    basemapSource = {
-      type: "raster",
-      tiles: [`${baseUrl}/proxy/osm/{z}/{x}/{y}.png`],
-      tileSize: 256,
-      maxzoom: 19,
-      attribution: "&copy; OpenStreetMap contributors",
-    };
-    basemapLayer = { id: "osm", type: "raster", source: "basemap" };
-  }
+  const sources = {};
+  const layers = [];
 
-  const sources = { basemap: basemapSource };
-  const layers = [basemapLayer];
+  // Canvas mode: no basemap, plan-only view
+  if (mode !== "canvas") {
+    let basemapSource, basemapLayer;
+    if (mode === "satellite") {
+      basemapSource = {
+        type: "raster",
+        tiles: [`${baseUrl}/proxy/satellite/{z}/{x}/{y}`],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: "Esri, Maxar, Earthstar Geographics",
+      };
+      basemapLayer = { id: "satellite", type: "raster", source: "basemap" };
+    } else {
+      basemapSource = {
+        type: "raster",
+        tiles: [`${baseUrl}/proxy/osm/{z}/{x}/{y}.png`],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: "&copy; OpenStreetMap contributors",
+      };
+      basemapLayer = { id: "osm", type: "raster", source: "basemap" };
+    }
+    sources.basemap = basemapSource;
+    layers.push(basemapLayer);
+  }
 
   // Each plan's image source uses its 4 corner coordinates directly
   // This is exactly what MapLibre expects: [TL, TR, BR, BL] as [lon, lat]
@@ -755,9 +942,11 @@ app.get("/style.json", (req, res) => {
     });
   });
 
+  const styleName = mode === "canvas" ? "Canvas (Plan Only)" : mode === "satellite" ? "Satellite + Plans" : "Map + Plans";
+  
   res.json({
     version: 8,
-    name: mode === "satellite" ? "Satellite + Plans" : "Map + Plans",
+    name: styleName,
     glyphs: `${baseUrl}/fonts/{fontstack}/{range}.pbf`,
     sources,
     layers,
@@ -942,27 +1131,36 @@ app.get("/health", (_req, res) => {
 // ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
-seedDefaultPlan();
+async function startServer() {
+  // Seed from GeoPDFs if DB is empty
+  await seedFromGeoPDFs();
 
-app.listen(PORT, () => {
-  const plans = readDb();
-  console.log(`\nTile server running at http://localhost:${PORT}`);
-  console.log(`Plans loaded: ${plans.length}`);
-  console.log(`\nGeo-referencing: AUTO-EXTRACT from uploaded files`);
-  console.log(`Extraction priority:`);
-  console.log(`  1. GeoTIFF → reads affine transform + CRS from TIFF tags`);
-  console.log(`  2. World file (.pgw/.tfw) → parses 6 affine parameters`);
-  console.log(`  3. Direct corners in request body`);
-  console.log(`  4. Center + dimensions fallback`);
-  console.log(`  5. Uncalibrated → use /api/plans/:id/calibrate later`);
-  console.log(`\nAPI endpoints:`);
-  console.log(`  GET    /api/plans          — list all plans`);
-  console.log(`  GET    /api/plans/:id      — get plan details`);
-  console.log(`  POST   /api/plans          — create plan (multipart with image)`);
-  console.log(`  PUT    /api/plans/:id      — update plan`);
-  console.log(`  DELETE /api/plans/:id      — delete plan`);
-  console.log(`  GET    /api/plans/:id/image — get plan image`);
-  console.log(`  GET    /style.json?mode=normal|satellite`);
-  console.log(`  POST   /api/plans/:id/calibrate — calibrate with control points`);
-  console.log(`  GET    /plan-info          — all plans with bounds`);
+  app.listen(PORT, () => {
+    const plans = readDb();
+    console.log(`\nTile server running at http://localhost:${PORT}`);
+    console.log(`Plans loaded: ${plans.length}`);
+    console.log(`\nGeo-referencing: AUTO-EXTRACT from uploaded files`);
+    console.log(`Extraction priority:`);
+    console.log(`  1. GeoPDF → reads GEO: metadata from PDF, renders to PNG`);
+    console.log(`  2. GeoTIFF → reads affine transform + CRS from TIFF tags`);
+    console.log(`  3. World file (.pgw/.tfw) → parses 6 affine parameters`);
+    console.log(`  4. Direct corners in request body`);
+    console.log(`  5. Center + dimensions fallback`);
+    console.log(`  6. Uncalibrated → use /api/plans/:id/calibrate later`);
+    console.log(`\nAPI endpoints:`);
+    console.log(`  GET    /api/plans          — list all plans`);
+    console.log(`  GET    /api/plans/:id      — get plan details`);
+    console.log(`  POST   /api/plans          — create plan (PDF/image upload)`);
+    console.log(`  PUT    /api/plans/:id      — update plan`);
+    console.log(`  DELETE /api/plans/:id      — delete plan`);
+    console.log(`  GET    /api/plans/:id/image — get plan image (rendered PNG)`);
+    console.log(`  GET    /style.json?mode=normal|satellite`);
+    console.log(`  POST   /api/plans/:id/calibrate — calibrate with control points`);
+    console.log(`  GET    /plan-info          — all plans with bounds`);
+  });
+}
+
+startServer().catch((err) => {
+  console.error("Failed to start server:", err);
+  process.exit(1);
 });

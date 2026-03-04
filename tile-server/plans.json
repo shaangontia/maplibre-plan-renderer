@@ -1,40 +1,9 @@
 [
   {
-    "id": "993c8b4f-3e6f-4b65-922b-1ee7886b5e9b",
-    "name": "Innovation Centre - Level 1",
-    "imagePath": "default_floor_plan.png",
-    "corners": {
-      "topLeft": [
-        -0.08740,
-        51.52140
-      ],
-      "topRight": [
-        -0.08540,
-        51.52140
-      ],
-      "bottomRight": [
-        -0.08540,
-        51.52080
-      ],
-      "bottomLeft": [
-        -0.08740,
-        51.52080
-      ]
-    },
-    "opacity": 0.85,
-    "rotation": 0,
-    "floor": "Level 1",
-    "building": "Innovation Centre",
-    "site": "10 Finsbury Square, London EC2A 1AF",
-    "crs": "EPSG:4326",
-    "calibrationMethod": "manual",
-    "createdAt": "2026-03-04T16:48:31.653Z",
-    "updatedAt": "2026-03-04T16:48:31.654Z"
-  },
-  {
-    "id": "a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6",
+    "id": "b9b6785e-334b-4430-81ef-88d9b81f60bc",
     "name": "Startup Hub - Ground Floor",
-    "imagePath": "berlin_floor_plan.png",
+    "imagePath": "berlin_plan.png",
+    "pdfPath": "berlin_plan.pdf",
     "corners": {
       "topLeft": [
         13.413,
@@ -56,31 +25,77 @@
     "opacity": 0.85,
     "rotation": 0,
     "floor": "Ground",
-    "building": "Startup Hub",
+    "building": "Startup Hub - Ground Floor",
     "site": "Alexanderplatz 1, 10178 Berlin",
     "crs": "EPSG:4326",
-    "calibrationMethod": "manual",
-    "createdAt": "2026-03-04T17:00:00.000Z",
-    "updatedAt": "2026-03-04T17:00:00.000Z"
+    "calibrationMethod": "geopdf",
+    "createdAt": "2026-03-04T19:32:00.643Z",
+    "updatedAt": "2026-03-04T19:32:00.643Z"
   },
   {
-    "id": "f6e5d4c3-b2a1-9087-6543-210fedcba987",
-    "name": "Design Studio - 1er Étage",
-    "imagePath": "paris_floor_plan.png",
+    "id": "fcef6223-2f5c-420b-a411-b98688554f13",
+    "name": "Innovation Centre - Level 1",
+    "imagePath": "london_plan.png",
+    "pdfPath": "london_plan.pdf",
     "corners": {
-      "topLeft": [2.29550, 48.87410],
-      "topRight": [2.29750, 48.87410],
-      "bottomRight": [2.29750, 48.87350],
-      "bottomLeft": [2.29550, 48.87350]
+      "topLeft": [
+        -0.0874,
+        51.5214
+      ],
+      "topRight": [
+        -0.0854,
+        51.5214
+      ],
+      "bottomRight": [
+        -0.0854,
+        51.5208
+      ],
+      "bottomLeft": [
+        -0.0874,
+        51.5208
+      ]
+    },
+    "opacity": 0.85,
+    "rotation": 0,
+    "floor": "Level 1",
+    "building": "Innovation Centre - Level 1",
+    "site": "10 Finsbury Square, London EC2A 1AF",
+    "crs": "EPSG:4326",
+    "calibrationMethod": "geopdf",
+    "createdAt": "2026-03-04T19:32:00.645Z",
+    "updatedAt": "2026-03-04T19:32:00.645Z"
+  },
+  {
+    "id": "370991aa-b048-4786-a1f0-fe923ddeb608",
+    "name": "Design Studio - 1er Étage",
+    "imagePath": "paris_plan.png",
+    "pdfPath": "paris_plan.pdf",
+    "corners": {
+      "topLeft": [
+        2.2955,
+        48.8741
+      ],
+      "topRight": [
+        2.2975,
+        48.8741
+      ],
+      "bottomRight": [
+        2.2975,
+        48.8735
+      ],
+      "bottomLeft": [
+        2.2955,
+        48.8735
+      ]
     },
     "opacity": 0.85,
     "rotation": 0,
     "floor": "1er Étage",
-    "building": "Design Studio",
+    "building": "Design Studio - 1er Étage",
     "site": "Avenue des Champs-Élysées 101, 75008 Paris",
     "crs": "EPSG:4326",
-    "calibrationMethod": "manual",
-    "createdAt": "2026-03-04T17:00:00.000Z",
-    "updatedAt": "2026-03-04T17:00:00.000Z"
+    "calibrationMethod": "geopdf",
+    "createdAt": "2026-03-04T19:32:00.646Z",
+    "updatedAt": "2026-03-04T19:32:00.646Z"
   }
 ]

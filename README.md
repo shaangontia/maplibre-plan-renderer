@@ -1,66 +1,83 @@
 # MapLibre 2D Plan Viewer
 
-A mobile app for viewing geo-referenced floor plans on a real-world map with defect pinning, area marking, and measurement tools.
+A mobile app for viewing geo-referenced floor plans on a real-world map with defect pinning, area marking, and measurement tools. Plans are loaded as **GeoPDFs** — the server extracts geo-reference metadata and renders them to PNG automatically.
 
 ## Architecture
 
 ```
-┌─────────────────┐       ┌──────────────────────┐
-│  React Native    │ HTTP  │  Node.js Tile Server  │
-│  (Expo + MapLibre│◄─────►│  (Express)            │
-│   React Native)  │       │                       │
-└─────────────────┘       └──────────────────────┘
-                               │
-                               ├─ /style.json  (MapLibre style with plan overlays)
-                               ├─ /plan-info   (plan metadata + corners)
-                               ├─ /api/plans   (CRUD with auto geo-reference extraction)
-                               ├─ /api/plans/:id/calibrate  (manual calibration)
-                               ├─ /proxy/osm   (basemap tile proxy)
-                               └─ /proxy/satellite
+┌─────────────────────────┐       ┌──────────────────────────────┐
+│  React Native App        │ HTTP  │  Node.js Tile Server          │
+│  (Expo + MapLibre RN)    │◄─────►│  (Express)                    │
+│                          │       │                                │
+│  plan-viewer/            │       │  tile-server/                  │
+│    app/(tabs)/           │       │    index.js        — main API  │
+│      index.tsx           │       │    plans.json      — local DB  │
+│      plan-viewer/        │       │    plans/images/   — GeoPDFs   │
+│        types.ts          │       │    generate-geopdf.js          │
+│        constants.ts      │       │                                │
+│        geoUtils.ts       │       │  Pipeline:                     │
+│        useAnnotations.ts │       │    PDF → extract GEO: metadata │
+│        usePlanData.ts    │       │    PDF → render page to PNG    │
+│        MapLayers.tsx     │       │    PNG → serve to MapLibre     │
+│        ToolBar.tsx       │       │                                │
+│        PlanDropdown.tsx  │       │  Endpoints:                    │
+│        BottomPanels.tsx  │       │    /style.json                 │
+│                          │       │    /plan-info                  │
+└─────────────────────────┘       │    /api/plans (CRUD + upload)  │
+                                   │    /api/plans/:id/calibrate    │
+                                   │    /proxy/osm, /proxy/satellite│
+                                   └──────────────────────────────┘
 ```
 
-## Production Geo-Referencing Pipeline
+## GeoPDF Pipeline
 
-### The Problem
-Floor plans are flat images (PNG, JPEG, TIFF, PDF). They contain no geospatial data by default. To overlay them on a real-world map, the server must know the real-world coordinates of each image corner.
+### How It Works
 
-### The Solution: Auto-Extract at Upload Time
-
-**Coordinates are NEVER hardcoded.** The server automatically extracts them from the uploaded file:
+The server loads **geospatial PDFs** — not plain images. Each PDF embeds geo-reference metadata in its Keywords field:
 
 ```
-Upload → Auto-detect → Extract corners → Store in DB → Serve to MapLibre
+GeoPDF Upload → Extract GEO: metadata → Render PDF→PNG → Store corners in DB → Serve to MapLibre
 ```
 
-The `plans.json` file is just a **local-dev database** (would be Postgres/MongoDB in production). It is populated automatically — not edited by hand.
+On first startup with an empty database, the server scans `plans/images/` for `.pdf` files, extracts their geo-reference metadata, renders them to high-resolution PNGs, and populates `plans.json` automatically.
 
-### Extraction Priority (on upload)
+### GeoPDF Metadata Format
+
+The PDF Keywords field contains semicolon-separated `GEO:` tags:
+
+```
+GEO:CRS=EPSG:4326; GEO:TOPLEFT=-0.0874,51.5214; GEO:TOPRIGHT=-0.0854,51.5214;
+GEO:BOTTOMRIGHT=-0.0854,51.5208; GEO:BOTTOMLEFT=-0.0874,51.5208;
+GEO:FLOOR=Level 1; GEO:BUILDING=Innovation Centre; GEO:SITE=10 Finsbury Square
+```
+
+This is extracted using `pdfjs-dist` and the PDF page is rendered to PNG via `node-canvas`.
+
+### Extraction Priority (on upload via POST /api/plans)
 
 | Priority | Method | Trigger | What Happens |
 |----------|--------|---------|--------------|
-| 1 | **GeoTIFF** | `.tif`/`.tiff` upload | Reads affine transform + CRS from TIFF tags. Auto-reprojects to WGS84. |
-| 2 | **World File** | `.pgw`/`.tfw`/`.jgw` sidecar uploaded alongside image | Parses 6 affine parameters → computes corners. |
-| 3 | **Explicit corners** | `corners` field in request body | Direct override — for BIM/CAD exports that provide corners separately. |
-| 4 | **Center + dimensions** | `centerLon/Lat` + `widthMeters/heightMeters` | Convenience fallback — converts to corners via haversine. |
-| 5 | **Uncalibrated** | None of the above | Plan saved with `[0,0]` corners. User calibrates later via `/calibrate`. |
-
-### Real-World Customer Scenarios
-
-| Customer Workflow | File Format | Auto-Extraction |
-|-------------------|-------------|-----------------|
-| **Surveyor exports from QGIS** | GeoTIFF (`.tif`) | Fully automated — CRS + transform embedded in TIFF tags |
-| **Architect exports from AutoCAD** | PNG + World file (`.pgw`) | Automated — world file parsed on upload |
-| **BIM coordinator exports from Revit** | Image + JSON corners | Semi-automated — corners passed in API call |
-| **Field engineer with a PDF scan** | Plain PNG/JPEG | Manual — user calibrates via `/calibrate` endpoint with 2+ GPS control points |
+| 1 | **GeoPDF** | `.pdf` upload | Reads `GEO:` metadata from PDF Keywords, renders page to PNG |
+| 2 | **GeoTIFF** | `.tif`/`.tiff` upload | Reads affine transform + CRS from TIFF tags. Auto-reprojects to WGS84 |
+| 3 | **World File** | `.pgw`/`.tfw`/`.jgw` sidecar | Parses 6 affine parameters → computes corners |
+| 4 | **Explicit corners** | `corners` in request body | Direct override — for BIM/CAD exports |
+| 5 | **Center + dimensions** | `centerLon/Lat` + `widthMeters/heightMeters` | Convenience fallback |
+| 6 | **Uncalibrated** | None of the above | Plan saved with `[0,0]` corners — calibrate later via `/calibrate` |
 
 ### Upload Examples
 
-**GeoTIFF (fully automated — no coordinates needed):**
+**GeoPDF (fully automated — name extracted from PDF metadata):**
+```bash
+curl -X POST http://localhost:8080/api/plans \
+  -F "image=@london_plan.pdf"
+# Server reads GEO: metadata, renders to PNG, extracts name/floor/site
+```
+
+**GeoTIFF:**
 ```bash
 curl -X POST http://localhost:8080/api/plans \
   -F "image=@georeferenced_plan.tif" \
   -F "name=Level 1"
-# Server auto-reads CRS + affine transform from TIFF tags
 ```
 
 **Image + World File sidecar:**
@@ -69,18 +86,10 @@ curl -X POST http://localhost:8080/api/plans \
   -F "image=@floor_plan.png" \
   -F "worldfile=@floor_plan.pgw" \
   -F "name=Level 1"
-# Server parses .pgw and computes corners automatically
 ```
 
-**Plain image (uploaded uncalibrated, then calibrated):**
+**Manual calibration (2+ control points):**
 ```bash
-# Step 1: Upload without coordinates
-curl -X POST http://localhost:8080/api/plans \
-  -F "image=@scan.png" \
-  -F "name=Level 1"
-# Returns: { "calibrationMethod": "uncalibrated", "id": "abc123" }
-
-# Step 2: Calibrate with control points (field engineer maps 2+ points)
 curl -X POST http://localhost:8080/api/plans/abc123/calibrate \
   -H "Content-Type: application/json" \
   -d '{
@@ -89,30 +98,39 @@ curl -X POST http://localhost:8080/api/plans/abc123/calibrate \
       { "pixel": [2000, 1400], "world": [-0.0857, 51.5204] }
     ]
   }'
-# Server computes affine transform → derives all 4 corners
 ```
 
-**Explicit corners (from BIM/CAD metadata):**
-```bash
-curl -X POST http://localhost:8080/api/plans \
-  -F "image=@floor_plan.png" \
-  -F "name=Level 1" \
-  -F 'corners={"topLeft":[-0.0877,51.521],"topRight":[-0.0857,51.521],"bottomRight":[-0.0857,51.5204],"bottomLeft":[-0.0877,51.5204]}'
-```
+## Plan Viewer — Modular Architecture
 
-### About PDFs
+The React Native app is split into focused modules under `app/(tabs)/plan-viewer/`:
 
-Standard PDFs from architects contain **no geospatial data** — they are just vectors/rasters. However:
-- **GeoPDFs** (OGC standard) embed a coordinate system and transform matrix. These can be parsed with GDAL (`gdalinfo plan.pdf`). Support can be added via a GDAL binding.
-- For regular PDFs, the production workflow is: convert to PNG/TIFF → upload with a world file or calibrate manually.
+| Module | Purpose |
+|--------|---------|
+| `types.ts` | All TypeScript interfaces and type aliases |
+| `constants.ts` | Server URL, severity colors, tool modes, polygon colors |
+| `geoUtils.ts` | Haversine distance, polygon area, formatting, centroid, uid |
+| `useAnnotations.ts` | Hook: annotation state + AsyncStorage persistence per plan |
+| `usePlanData.ts` | Hook: fetches plan data from server, manages active plan |
+| `MapLayers.tsx` | All MapLibreGL ShapeSource + Layer components (GeoJSON) |
+| `ToolBar.tsx` | Tool mode selector, severity dots, drawing bar |
+| `PlanDropdown.tsx` | Plan selector dropdown with modal |
+| `BottomPanels.tsx` | Defect info bar, polygon list, measurement list |
+
+The main `index.tsx` composes these into a ~300-line screen component.
 
 ## Running
+
+### Generate GeoPDFs (first time)
+```bash
+cd tile-server
+npm install
+node generate-geopdf.js   # creates 3 GeoPDFs in plans/images/
+```
 
 ### Tile Server
 ```bash
 cd tile-server
-npm install
-npm start        # starts on port 8080
+npm start        # seeds from GeoPDFs on first run, starts on port 8080
 npm run stop     # kills the server
 npm run restart  # stop + start
 ```
@@ -126,9 +144,10 @@ npx expo run:ios    # or npx expo run:android
 
 ## Features
 
+- **GeoPDF loading** — PDFs with embedded geo-reference metadata, auto-rendered to PNG
 - **Map + Satellite toggle** — OSM and Esri satellite basemaps
 - **Floor plan overlay** — Geo-referenced image overlay with configurable opacity
-- **Auto geo-reference extraction** — GeoTIFF, world file, or manual calibration
+- **Auto geo-reference extraction** — GeoPDF, GeoTIFF, world file, or manual calibration
 - **Plan dropdown** — Switch between multiple plans (London, Berlin, Paris)
 - **Per-plan persistence** — Pins, areas, measurements saved to device per plan (AsyncStorage)
 - **Defect pinning** — Tap to place severity-coded defect markers
@@ -136,3 +155,4 @@ npx expo run:ios    # or npx expo run:android
 - **Measurement tool** — Tap two points to measure distance (haversine formula)
 - **Zoom-responsive labels** — Text and markers scale with zoom level
 - **Manual calibration API** — 2+ control points → affine transform → corners
+- **Modular codebase** — Plan viewer split into types, hooks, and component modules

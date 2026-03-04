@@ -1,215 +1,24 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import MapLibreGL from "@maplibre/maplibre-react-native";
-import type { Feature, FeatureCollection, Point, Polygon, LineString } from "geojson";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Feature } from "geojson";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
-  Modal,
-  Platform,
   SafeAreaView,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-type Severity = "low" | "medium" | "high" | "critical";
-type MapMode = "normal" | "satellite";
-type ToolMode = "pin" | "polygon" | "measure";
-
-interface PlanInfo {
-  id: string;
-  name: string;
-  center: [number, number];
-  corners: {
-    topLeft: [number, number];
-    topRight: [number, number];
-    bottomRight: [number, number];
-    bottomLeft: [number, number];
-  };
-  bounds: { sw: [number, number]; ne: [number, number] };
-  opacity: number;
-  floor?: string;
-  building?: string;
-  site?: string;
-  calibrationMethod?: string;
-}
-
-interface PlanInfoResponse {
-  plans: PlanInfo[];
-  center: [number, number];
-  bounds: { sw: [number, number]; ne: [number, number] };
-  zoom: number;
-}
-
-interface Defect {
-  id: string;
-  longitude: number;
-  latitude: number;
-  label: string;
-  severity: Severity;
-  createdAt: number;
-}
-
-type Coord = [number, number]; // [lon, lat]
-
-interface AreaPolygon {
-  id: string;
-  coords: Coord[];
-  label: string;
-  areaSqM: number;
-  color: string;
-}
-
-interface Measurement {
-  id: string;
-  from: Coord;
-  to: Coord;
-  distanceM: number;
-}
-
-interface PlanAnnotations {
-  defects: Defect[];
-  polygons: AreaPolygon[];
-  measurements: Measurement[];
-}
-
-// ---------------------------------------------------------------------------
-// Geo utilities
-// ---------------------------------------------------------------------------
-const DEG2RAD = Math.PI / 180;
-
-function haversineDistance(a: Coord, b: Coord): number {
-  const [lon1, lat1] = a;
-  const [lon2, lat2] = b;
-  const R = 6371000;
-  const dLat = (lat2 - lat1) * DEG2RAD;
-  const dLon = (lon2 - lon1) * DEG2RAD;
-  const sinLat = Math.sin(dLat / 2);
-  const sinLon = Math.sin(dLon / 2);
-  const h =
-    sinLat * sinLat +
-    Math.cos(lat1 * DEG2RAD) * Math.cos(lat2 * DEG2RAD) * sinLon * sinLon;
-  return 2 * R * Math.asin(Math.sqrt(h));
-}
-
-function polygonAreaSqM(coords: Coord[]): number {
-  if (coords.length < 3) return 0;
-  const R = 6371000;
-  let total = 0;
-  for (let i = 0; i < coords.length; i++) {
-    const j = (i + 1) % coords.length;
-    const [lon1, lat1] = coords[i];
-    const [lon2, lat2] = coords[j];
-    total +=
-      (lon2 - lon1) * DEG2RAD * (2 + Math.sin(lat1 * DEG2RAD) + Math.sin(lat2 * DEG2RAD));
-  }
-  return Math.abs((total * R * R) / 2);
-}
-
-function formatDistance(m: number): string {
-  if (m < 1) return `${(m * 100).toFixed(0)} cm`;
-  if (m < 1000) return `${m.toFixed(2)} m`;
-  return `${(m / 1000).toFixed(3)} km`;
-}
-
-function formatArea(sqm: number): string {
-  if (sqm < 1) return `${(sqm * 10000).toFixed(0)} cm\u00B2`;
-  if (sqm < 10000) return `${sqm.toFixed(2)} m\u00B2`;
-  return `${(sqm / 10000).toFixed(3)} ha`;
-}
-
-function centroid(coords: Coord[]): Coord {
-  let lon = 0;
-  let lat = 0;
-  for (const c of coords) {
-    lon += c[0];
-    lat += c[1];
-  }
-  return [lon / coords.length, lat / coords.length];
-}
-
-function midpoint(a: Coord, b: Coord): Coord {
-  return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-}
-
-function perimeterDistance(coords: Coord[]): number {
-  let total = 0;
-  for (let i = 0; i < coords.length; i++) {
-    total += haversineDistance(coords[i], coords[(i + 1) % coords.length]);
-  }
-  return total;
-}
-
-const POLYGON_COLORS = [
-  "#2196F3",
-  "#E91E63",
-  "#00BCD4",
-  "#FF5722",
-  "#8BC34A",
-  "#673AB7",
-  "#FFC107",
-  "#009688",
-];
-
-let _uid = 0;
-function uid(): string {
-  return `${Date.now()}-${++_uid}`;
-}
-
-// ---------------------------------------------------------------------------
-// AsyncStorage helpers — persist annotations per plan
-// ---------------------------------------------------------------------------
-const STORAGE_PREFIX = "plan_annotations_";
-
-async function loadAnnotations(planId: string): Promise<PlanAnnotations> {
-  try {
-    const raw = await AsyncStorage.getItem(`${STORAGE_PREFIX}${planId}`);
-    if (raw) return JSON.parse(raw);
-  } catch (e) {
-    console.warn("Failed to load annotations:", e);
-  }
-  return { defects: [], polygons: [], measurements: [] };
-}
-
-async function saveAnnotations(planId: string, data: PlanAnnotations): Promise<void> {
-  try {
-    await AsyncStorage.setItem(`${STORAGE_PREFIX}${planId}`, JSON.stringify(data));
-  } catch (e) {
-    console.warn("Failed to save annotations:", e);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-const TILE_SERVER =
-  Platform.OS === "android" ? "http://10.0.2.2:8080" : "http://localhost:8080";
-
-const SEVERITY_COLORS: Record<Severity, string> = {
-  low: "#4CAF50",
-  medium: "#FF9800",
-  high: "#F44336",
-  critical: "#9C27B0",
-};
-
-const SEVERITY_ORDER: Severity[] = ["low", "medium", "high", "critical"];
-
-const TOOL_MODES: { key: ToolMode; label: string; icon: string }[] = [
-  { key: "pin", label: "Pin", icon: "\uD83D\uDCCC" },
-  { key: "polygon", label: "Area", icon: "\u2B1F" },
-  { key: "measure", label: "Measure", icon: "\uD83D\uDCCF" },
-];
-
-const DEFAULT_CENTER: [number, number] = [0, 0];
-
-const getStyleUrl = (mode: MapMode) =>
-  `${TILE_SERVER}/style.json?mode=${mode}`;
+import type { Coord, MapMode, PlanInfo, ToolMode } from "./plan-viewer/types";
+import { getStyleUrl } from "./plan-viewer/constants";
+import { usePlanData } from "./plan-viewer/usePlanData";
+import { useAnnotations } from "./plan-viewer/useAnnotations";
+import { useExportImport } from "./plan-viewer/useExportImport";
+import MapLayers from "./plan-viewer/MapLayers";
+import { ToolBar, DrawingBar } from "./plan-viewer/ToolBar";
+import PlanDropdown from "./plan-viewer/PlanDropdown";
+import { DefectInfoBar, PolygonList, MeasurementList } from "./plan-viewer/BottomPanels";
 
 // ---------------------------------------------------------------------------
 // Component
@@ -220,224 +29,43 @@ export default function PlanViewerScreen() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapRef = useRef<any>(null);
 
-  // Server-fetched plan data
-  const [planData, setPlanData] = useState<PlanInfoResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [activePlanId, setActivePlanId] = useState<string | null>(null);
-  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const { planData, loading, activePlanId, setActivePlanId, activePlan, mapCenter } =
+    usePlanData();
 
-  // Tool state
+  const annotations = useAnnotations(activePlanId);
+  const {
+    defects,
+    polygons,
+    measurements,
+    drawingCoords,
+    measureStart,
+    selectedDefect,
+    selectedSeverity,
+    setSelectedDefect,
+    setSelectedSeverity,
+    addDefect,
+    deleteDefect,
+    addDrawingPoint,
+    finishPolygon,
+    deletePolygon,
+    addMeasurement,
+    deleteMeasurement,
+    cancelDrawing,
+    undoLastPoint,
+    clearAll,
+    loadImportedAnnotations,
+  } = annotations;
+
+  const { exportAnnotations, importAnnotations } = useExportImport(
+    activePlanId,
+    activePlan?.name || "Unknown Plan",
+    { defects, polygons, measurements },
+    loadImportedAnnotations
+  );
+
   const [toolMode, setToolMode] = useState<ToolMode>("pin");
-
-  // Pin state
-  const [defects, setDefects] = useState<Defect[]>([]);
-  const [selectedSeverity, setSelectedSeverity] = useState<Severity>("medium");
-  const [selectedDefect, setSelectedDefect] = useState<Defect | null>(null);
-
-  // Polygon state
-  const [polygons, setPolygons] = useState<AreaPolygon[]>([]);
-  const [drawingCoords, setDrawingCoords] = useState<Coord[]>([]);
-
-  // Measurement state
-  const [measurements, setMeasurements] = useState<Measurement[]>([]);
-  const [measureStart, setMeasureStart] = useState<Coord | null>(null);
-
   const [mapMode, setMapMode] = useState<MapMode>("normal");
-
-  // Track whether initial load from storage is done to avoid overwriting
-  const loadedPlanRef = useRef<string | null>(null);
-  const skipSaveRef = useRef(false);
-
-  // Fetch plan info from server
-  useEffect(() => {
-    (async () => {
-      try {
-        const resp = await fetch(`${TILE_SERVER}/plan-info`);
-        const data: PlanInfoResponse = await resp.json();
-        setPlanData(data);
-        if (data.plans.length > 0) {
-          const firstId = data.plans[0].id;
-          setActivePlanId(firstId);
-        }
-      } catch (err) {
-        console.warn("Failed to fetch plan info:", err);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
-  // Load annotations when activePlanId changes
-  useEffect(() => {
-    if (!activePlanId) return;
-    skipSaveRef.current = true;
-    (async () => {
-      const annotations = await loadAnnotations(activePlanId);
-      setDefects(annotations.defects);
-      setPolygons(annotations.polygons);
-      setMeasurements(annotations.measurements);
-      setDrawingCoords([]);
-      setMeasureStart(null);
-      setSelectedDefect(null);
-      loadedPlanRef.current = activePlanId;
-      // Allow saves after state is loaded
-      setTimeout(() => { skipSaveRef.current = false; }, 100);
-    })();
-  }, [activePlanId]);
-
-  // Auto-save annotations whenever defects/polygons/measurements change
-  useEffect(() => {
-    if (!activePlanId || skipSaveRef.current) return;
-    if (loadedPlanRef.current !== activePlanId) return;
-    saveAnnotations(activePlanId, { defects, polygons, measurements });
-  }, [defects, polygons, measurements, activePlanId]);
-
-  const activePlan = useMemo(
-    () => planData?.plans.find((p) => p.id === activePlanId) ?? null,
-    [planData, activePlanId]
-  );
-
-  const mapCenter = useMemo<[number, number]>(
-    () => activePlan?.center ?? planData?.center ?? DEFAULT_CENTER,
-    [activePlan, planData]
-  );
-
-  // ------ GeoJSON: defect pins ------
-  const defectsGeoJSON = useMemo<FeatureCollection<Point>>(
-    () => ({
-      type: "FeatureCollection",
-      features: defects.map((d) => ({
-        type: "Feature" as const,
-        id: d.id,
-        properties: {
-          label: d.label,
-          severity: d.severity,
-          color: SEVERITY_COLORS[d.severity],
-          defectId: d.id,
-        },
-        geometry: { type: "Point" as const, coordinates: [d.longitude, d.latitude] },
-      })),
-    }),
-    [defects]
-  );
-
-  // ------ GeoJSON: completed polygons ------
-  const polygonsGeoJSON = useMemo<FeatureCollection<Polygon>>(
-    () => ({
-      type: "FeatureCollection",
-      features: polygons.map((p) => ({
-        type: "Feature" as const,
-        id: p.id,
-        properties: {
-          color: p.color,
-          label: p.label,
-          area: formatArea(p.areaSqM),
-          polygonId: p.id,
-        },
-        geometry: {
-          type: "Polygon" as const,
-          coordinates: [[...p.coords, p.coords[0]]],
-        },
-      })),
-    }),
-    [polygons]
-  );
-
-  // ------ GeoJSON: polygon area labels (centroids) ------
-  const polygonLabelsGeoJSON = useMemo<FeatureCollection<Point>>(
-    () => ({
-      type: "FeatureCollection",
-      features: polygons.map((p) => {
-        const c = centroid(p.coords);
-        return {
-          type: "Feature" as const,
-          id: `label-${p.id}`,
-          properties: {
-            label: `${p.label}\n${formatArea(p.areaSqM)}\nPerimeter: ${formatDistance(perimeterDistance(p.coords))}`,
-          },
-          geometry: { type: "Point" as const, coordinates: c },
-        };
-      }),
-    }),
-    [polygons]
-  );
-
-  // ------ GeoJSON: drawing-in-progress polygon outline ------
-  const drawingGeoJSON = useMemo<FeatureCollection<LineString | Point>>(
-    () => ({
-      type: "FeatureCollection",
-      features: [
-        ...(drawingCoords.length >= 2
-          ? [
-              {
-                type: "Feature" as const,
-                id: "drawing-line",
-                properties: {},
-                geometry: {
-                  type: "LineString" as const,
-                  coordinates: drawingCoords,
-                },
-              },
-            ]
-          : []),
-        ...drawingCoords.map((c, i) => ({
-          type: "Feature" as const,
-          id: `drawing-pt-${i}`,
-          properties: { index: i },
-          geometry: { type: "Point" as const, coordinates: c },
-        })),
-      ],
-    }),
-    [drawingCoords]
-  );
-
-  // ------ GeoJSON: measurements (lines + labels) ------
-  const measureLinesGeoJSON = useMemo<FeatureCollection<LineString>>(
-    () => ({
-      type: "FeatureCollection",
-      features: measurements.map((m) => ({
-        type: "Feature" as const,
-        id: m.id,
-        properties: { dist: formatDistance(m.distanceM), measureId: m.id },
-        geometry: { type: "LineString" as const, coordinates: [m.from, m.to] },
-      })),
-    }),
-    [measurements]
-  );
-
-  const measureLabelsGeoJSON = useMemo<FeatureCollection<Point>>(
-    () => ({
-      type: "FeatureCollection",
-      features: measurements.map((m) => {
-        const mid = midpoint(m.from, m.to);
-        return {
-          type: "Feature" as const,
-          id: `ml-${m.id}`,
-          properties: { label: formatDistance(m.distanceM) },
-          geometry: { type: "Point" as const, coordinates: mid },
-        };
-      }),
-    }),
-    [measurements]
-  );
-
-  // ------ GeoJSON: measure start point (pending) ------
-  const measurePendingGeoJSON = useMemo<FeatureCollection<Point | LineString>>(
-    () => ({
-      type: "FeatureCollection",
-      features: measureStart
-        ? [
-            {
-              type: "Feature" as const,
-              id: "measure-start",
-              properties: {},
-              geometry: { type: "Point" as const, coordinates: measureStart },
-            },
-          ]
-        : [],
-    }),
-    [measureStart]
-  );
+  const [dropdownOpen, setDropdownOpen] = useState(false);
 
   // ------ Callbacks ------
   const flyToPlan = useCallback(
@@ -457,7 +85,6 @@ export default function PlanViewerScreen() {
     flyToPlan();
   }, [flyToPlan]);
 
-  // Handle map tap based on active tool
   const handleMapPress = useCallback(
     (feature: Feature) => {
       if (feature.geometry.type !== "Point") return;
@@ -465,103 +92,15 @@ export default function PlanViewerScreen() {
       const coord: Coord = [lon, lat];
 
       if (toolMode === "pin") {
-        const id = uid();
-        const defectNumber = defects.length + 1;
-        const newDefect: Defect = {
-          id,
-          longitude: lon,
-          latitude: lat,
-          label: `Defect #${defectNumber}`,
-          severity: selectedSeverity,
-          createdAt: Date.now(),
-        };
-        setDefects((prev) => [...prev, newDefect]);
-        setSelectedDefect(newDefect);
+        addDefect(lon, lat);
       } else if (toolMode === "polygon") {
-        setDrawingCoords((prev) => [...prev, coord]);
+        addDrawingPoint(coord);
       } else if (toolMode === "measure") {
-        if (!measureStart) {
-          setMeasureStart(coord);
-        } else {
-          const dist = haversineDistance(measureStart, coord);
-          setMeasurements((prev) => [
-            ...prev,
-            { id: uid(), from: measureStart, to: coord, distanceM: dist },
-          ]);
-          setMeasureStart(null);
-        }
+        addMeasurement(coord);
       }
     },
-    [toolMode, defects.length, selectedSeverity, measureStart]
+    [toolMode, addDefect, addDrawingPoint, addMeasurement]
   );
-
-  const finishPolygon = useCallback(() => {
-    if (drawingCoords.length < 3) {
-      Alert.alert("Need at least 3 points", "Tap more points on the map first.");
-      return;
-    }
-    const area = polygonAreaSqM(drawingCoords);
-    const color = POLYGON_COLORS[polygons.length % POLYGON_COLORS.length];
-    const poly: AreaPolygon = {
-      id: uid(),
-      coords: [...drawingCoords],
-      label: `Area ${polygons.length + 1}`,
-      areaSqM: area,
-      color,
-    };
-    setPolygons((prev) => [...prev, poly]);
-    setDrawingCoords([]);
-  }, [drawingCoords, polygons.length]);
-
-  const cancelDrawing = useCallback(() => {
-    setDrawingCoords([]);
-    setMeasureStart(null);
-  }, []);
-
-  const undoLastPoint = useCallback(() => {
-    setDrawingCoords((prev) => prev.slice(0, -1));
-  }, []);
-
-  const deleteDefect = useCallback((id: string) => {
-    setDefects((prev) => prev.filter((d) => d.id !== id));
-    setSelectedDefect(null);
-  }, []);
-
-  const confirmDeleteDefect = useCallback(
-    (defect: Defect) => {
-      Alert.alert("Delete Defect", `Remove "${defect.label}"?`, [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: () => deleteDefect(defect.id) },
-      ]);
-    },
-    [deleteDefect]
-  );
-
-  const deletePolygon = useCallback((id: string) => {
-    setPolygons((prev) => prev.filter((p) => p.id !== id));
-  }, []);
-
-  const deleteMeasurement = useCallback((id: string) => {
-    setMeasurements((prev) => prev.filter((m) => m.id !== id));
-  }, []);
-
-  const clearAll = useCallback(() => {
-    Alert.alert("Clear All", "Remove all pins, polygons & measurements?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Clear",
-        style: "destructive",
-        onPress: () => {
-          setDefects([]);
-          setPolygons([]);
-          setMeasurements([]);
-          setDrawingCoords([]);
-          setMeasureStart(null);
-          setSelectedDefect(null);
-        },
-      },
-    ]);
-  }, []);
 
   const handlePinPress = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -571,17 +110,16 @@ export default function PlanViewerScreen() {
       const defect = defects.find((d) => d.id === feature.properties.defectId);
       if (defect) setSelectedDefect(defect);
     },
-    [defects]
+    [defects, setSelectedDefect]
   );
 
   const selectPlan = useCallback(
     (plan: PlanInfo) => {
       setActivePlanId(plan.id);
       setDropdownOpen(false);
-      // flyToPlan will fire after annotations load via useEffect
       setTimeout(() => flyToPlan(plan), 200);
     },
-    [flyToPlan]
+    [flyToPlan, setActivePlanId]
   );
 
   // Status text
@@ -610,150 +148,49 @@ export default function PlanViewerScreen() {
       <View style={styles.header}>
         <View style={styles.headerRow}>
           <Text style={styles.title}>Plan Viewer</Text>
-          <Text style={styles.statsBadge}>
-            {defects.length}P {polygons.length}A {measurements.length}M
-          </Text>
-        </View>
-
-        {/* Plan dropdown trigger */}
-        {planData && planData.plans.length > 0 && (
-          <TouchableOpacity
-            style={styles.dropdownTrigger}
-            onPress={() => setDropdownOpen(true)}
-          >
-            <Text style={styles.dropdownTriggerText} numberOfLines={1}>
-              {activePlan ? activePlan.name : "Select plan..."}
+          <View style={styles.headerActions}>
+            <TouchableOpacity style={styles.exportBtn} onPress={exportAnnotations}>
+              <Text style={styles.exportBtnText}>📤 Export</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.importBtn} onPress={importAnnotations}>
+              <Text style={styles.importBtnText}>📥 Import</Text>
+            </TouchableOpacity>
+            <Text style={styles.statsBadge}>
+              {defects.length}P {polygons.length}A {measurements.length}M
             </Text>
-            <Text style={styles.dropdownArrow}>{"\u25BC"}</Text>
-          </TouchableOpacity>
-        )}
-
-        {activePlan?.site && (
-          <Text style={styles.sub}>{activePlan.site}</Text>
-        )}
-      </View>
-
-      {/* Plan dropdown modal */}
-      <Modal
-        visible={dropdownOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setDropdownOpen(false)}
-      >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setDropdownOpen(false)}
-        >
-          <View style={styles.dropdownMenu}>
-            <Text style={styles.dropdownTitle}>Select Plan</Text>
-            <ScrollView style={styles.dropdownScroll}>
-              {planData?.plans.map((plan) => (
-                <TouchableOpacity
-                  key={plan.id}
-                  style={[
-                    styles.dropdownItem,
-                    activePlanId === plan.id && styles.dropdownItemActive,
-                  ]}
-                  onPress={() => selectPlan(plan)}
-                >
-                  <View style={styles.dropdownItemContent}>
-                    <Text
-                      style={[
-                        styles.dropdownItemName,
-                        activePlanId === plan.id && styles.dropdownItemNameActive,
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {plan.name}
-                    </Text>
-                    {plan.site && (
-                      <Text style={styles.dropdownItemSite} numberOfLines={1}>
-                        {plan.site}
-                      </Text>
-                    )}
-                  </View>
-                  {activePlanId === plan.id && (
-                    <Text style={styles.dropdownCheck}>{"\u2713"}</Text>
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
           </View>
-        </TouchableOpacity>
-      </Modal>
+        </View>
+        <PlanDropdown
+          planData={planData}
+          activePlanId={activePlanId}
+          activePlan={activePlan}
+          dropdownOpen={dropdownOpen}
+          setDropdownOpen={setDropdownOpen}
+          onSelectPlan={selectPlan}
+        />
+      </View>
 
       {/* Tool mode selector */}
-      <View style={styles.toolBar}>
-        {TOOL_MODES.map((t) => (
-          <TouchableOpacity
-            key={t.key}
-            style={[styles.toolBtn, toolMode === t.key && styles.toolBtnActive]}
-            onPress={() => {
-              setToolMode(t.key);
-              cancelDrawing();
-            }}
-          >
-            <Text style={styles.toolIcon}>{t.icon}</Text>
-            <Text style={[styles.toolLabel, toolMode === t.key && styles.toolLabelActive]}>
-              {t.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-
-        {/* Severity (only in pin mode) */}
-        {toolMode === "pin" && (
-          <View style={styles.severityInline}>
-            {SEVERITY_ORDER.map((sev) => (
-              <TouchableOpacity
-                key={sev}
-                style={[
-                  styles.sevDot,
-                  { backgroundColor: SEVERITY_COLORS[sev] },
-                  selectedSeverity === sev && styles.sevDotActive,
-                ]}
-                onPress={() => setSelectedSeverity(sev)}
-              />
-            ))}
-          </View>
-        )}
-
-        {/* Clear all */}
-        {(defects.length > 0 || polygons.length > 0 || measurements.length > 0) && (
-          <TouchableOpacity style={styles.clearBtn} onPress={clearAll}>
-            <Text style={styles.clearBtnText}>Clear</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+      <ToolBar
+        toolMode={toolMode}
+        setToolMode={setToolMode}
+        selectedSeverity={selectedSeverity}
+        setSelectedSeverity={setSelectedSeverity}
+        defectsCount={defects.length}
+        polygonsCount={polygons.length}
+        measurementsCount={measurements.length}
+        onClearAll={clearAll}
+        cancelDrawing={cancelDrawing}
+      />
 
       {/* Drawing controls */}
-      {toolMode === "polygon" && drawingCoords.length > 0 && (
-        <View style={styles.drawingBar}>
-          <Text style={styles.drawingText}>
-            {drawingCoords.length} pts |{" "}
-            {drawingCoords.length >= 2
-              ? formatDistance(
-                  drawingCoords.reduce(
-                    (sum, c, i) =>
-                      i === 0 ? 0 : sum + haversineDistance(drawingCoords[i - 1], c),
-                    0
-                  )
-                )
-              : "0 m"}
-          </Text>
-          <TouchableOpacity style={styles.drawingAction} onPress={undoLastPoint}>
-            <Text style={styles.drawingActionText}>Undo</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.drawingAction} onPress={cancelDrawing}>
-            <Text style={[styles.drawingActionText, { color: "#F44336" }]}>Cancel</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.drawingAction, styles.finishBtn]}
-            onPress={finishPolygon}
-          >
-            <Text style={[styles.drawingActionText, { color: "#fff" }]}>Finish</Text>
-          </TouchableOpacity>
-        </View>
+      {toolMode === "polygon" && (
+        <DrawingBar
+          drawingCoords={drawingCoords}
+          onUndo={undoLastPoint}
+          onCancel={cancelDrawing}
+          onFinish={finishPolygon}
+        />
       )}
 
       {/* Status line */}
@@ -781,168 +218,26 @@ export default function PlanViewerScreen() {
             maxZoomLevel={22}
           />
 
-          {/* Completed polygons — fill + outline */}
-          <MapLibreGL.ShapeSource id="polygons-fill" shape={polygonsGeoJSON}>
-            <MapLibreGL.FillLayer
-              id="polygons-fill-layer"
-              style={{
-                fillColor: ["get", "color"],
-                fillOpacity: 0.2,
-              }}
-            />
-            <MapLibreGL.LineLayer
-              id="polygons-outline-layer"
-              style={{
-                lineColor: ["get", "color"],
-                lineWidth: [
-                  "interpolate", ["linear"], ["zoom"],
-                  14, 1,
-                  17, 2,
-                  20, 3,
-                ],
-                lineOpacity: 0.9,
-              }}
-            />
-          </MapLibreGL.ShapeSource>
-
-          {/* Polygon labels — zoom-responsive text size */}
-          <MapLibreGL.ShapeSource id="polygon-labels" shape={polygonLabelsGeoJSON}>
-            <MapLibreGL.SymbolLayer
-              id="polygon-labels-layer"
-              minZoomLevel={15}
-              style={{
-                textField: ["get", "label"],
-                textSize: [
-                  "interpolate", ["linear"], ["zoom"],
-                  15, 8,
-                  17, 10,
-                  18, 12,
-                  20, 14,
-                  22, 16,
-                ],
-                textColor: "#1a1a1a",
-                textHaloColor: "#ffffff",
-                textHaloWidth: 1.5,
-                textAllowOverlap: true,
-              }}
-            />
-          </MapLibreGL.ShapeSource>
-
-          {/* Drawing-in-progress */}
-          <MapLibreGL.ShapeSource id="drawing" shape={drawingGeoJSON}>
-            <MapLibreGL.LineLayer
-              id="drawing-line-layer"
-              style={{
-                lineColor: "#FF5722",
-                lineWidth: 2,
-                lineDasharray: [4, 3],
-              }}
-            />
-            <MapLibreGL.CircleLayer
-              id="drawing-points-layer"
-              style={{
-                circleRadius: [
-                  "interpolate", ["linear"], ["zoom"],
-                  14, 3,
-                  18, 6,
-                  22, 10,
-                ],
-                circleColor: "#FF5722",
-                circleStrokeColor: "#fff",
-                circleStrokeWidth: 2,
-              }}
-            />
-          </MapLibreGL.ShapeSource>
-
-          {/* Measurement lines */}
-          <MapLibreGL.ShapeSource id="measure-lines" shape={measureLinesGeoJSON}>
-            <MapLibreGL.LineLayer
-              id="measure-lines-layer"
-              style={{
-                lineColor: "#E91E63",
-                lineWidth: [
-                  "interpolate", ["linear"], ["zoom"],
-                  14, 1.5,
-                  18, 2.5,
-                  22, 4,
-                ],
-              }}
-            />
-          </MapLibreGL.ShapeSource>
-
-          {/* Measurement labels — zoom-responsive */}
-          <MapLibreGL.ShapeSource id="measure-labels" shape={measureLabelsGeoJSON}>
-            <MapLibreGL.SymbolLayer
-              id="measure-labels-layer"
-              minZoomLevel={15}
-              style={{
-                textField: ["get", "label"],
-                textSize: [
-                  "interpolate", ["linear"], ["zoom"],
-                  15, 9,
-                  17, 11,
-                  18, 13,
-                  20, 15,
-                ],
-                textColor: "#E91E63",
-                textHaloColor: "#ffffff",
-                textHaloWidth: 2,
-                textAllowOverlap: true,
-                textOffset: [0, -1],
-                textFont: ["Open Sans Regular"],
-              }}
-            />
-          </MapLibreGL.ShapeSource>
-
-          {/* Measure start pending point */}
-          <MapLibreGL.ShapeSource id="measure-pending" shape={measurePendingGeoJSON}>
-            <MapLibreGL.CircleLayer
-              id="measure-pending-layer"
-              style={{
-                circleRadius: [
-                  "interpolate", ["linear"], ["zoom"],
-                  14, 4,
-                  18, 7,
-                  22, 11,
-                ],
-                circleColor: "#E91E63",
-                circleStrokeColor: "#fff",
-                circleStrokeWidth: 2,
-              }}
-            />
-          </MapLibreGL.ShapeSource>
-
-          {/* Defect pins — zoom-responsive */}
-          <MapLibreGL.ShapeSource id="defects" shape={defectsGeoJSON} onPress={handlePinPress}>
-            <MapLibreGL.CircleLayer
-              id="defects-circle"
-              style={{
-                circleRadius: [
-                  "interpolate", ["linear"], ["zoom"],
-                  14, 4,
-                  17, 6,
-                  19, 8,
-                  22, 12,
-                ],
-                circleColor: ["get", "color"],
-                circleStrokeColor: "#ffffff",
-                circleStrokeWidth: 2.5,
-                circleOpacity: 0.95,
-              }}
-            />
-          </MapLibreGL.ShapeSource>
+          <MapLayers
+            defects={defects}
+            polygons={polygons}
+            measurements={measurements}
+            drawingCoords={drawingCoords}
+            measureStart={measureStart}
+            onPinPress={handlePinPress}
+          />
         </MapLibreGL.MapView>
 
         {/* Map mode toggle */}
         <View style={styles.mapToggle}>
-          {(["normal", "satellite"] as MapMode[]).map((m) => (
+          {(["normal", "satellite", "canvas"] as MapMode[]).map((m) => (
             <TouchableOpacity
               key={m}
               style={[styles.toggleBtn, mapMode === m && styles.toggleBtnActive]}
               onPress={() => setMapMode(m)}
             >
               <Text style={[styles.toggleBtnText, mapMode === m && styles.toggleBtnTextActive]}>
-                {m === "normal" ? "Map" : "Satellite"}
+                {m === "normal" ? "Map" : m === "satellite" ? "Satellite" : "Canvas"}
               </Text>
             </TouchableOpacity>
           ))}
@@ -975,63 +270,22 @@ export default function PlanViewerScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Bottom panel: info bars */}
+      {/* Bottom panels */}
       {selectedDefect && (
-        <View style={styles.infoBar}>
-          <View style={[styles.infoDot, { backgroundColor: SEVERITY_COLORS[selectedDefect.severity] }]} />
-          <View style={styles.infoText}>
-            <Text style={styles.infoTitle}>{selectedDefect.label}</Text>
-            <Text style={styles.infoDetail}>
-              {selectedDefect.severity.toUpperCase()} | {selectedDefect.longitude.toFixed(6)}, {selectedDefect.latitude.toFixed(6)}
-            </Text>
-          </View>
-          <TouchableOpacity style={styles.deleteBtn} onPress={() => confirmDeleteDefect(selectedDefect)}>
-            <Text style={styles.deleteBtnText}>Delete</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.closeBtn} onPress={() => setSelectedDefect(null)}>
-            <Text style={styles.closeBtnText}>X</Text>
-          </TouchableOpacity>
-        </View>
+        <DefectInfoBar
+          defect={selectedDefect}
+          onDelete={() => deleteDefect(selectedDefect.id)}
+          onClose={() => setSelectedDefect(null)}
+        />
       )}
-
-      {/* Polygon list */}
-      {polygons.length > 0 && (
-        <ScrollView style={styles.itemList} horizontal showsHorizontalScrollIndicator={false}>
-          {polygons.map((p) => (
-            <View key={p.id} style={[styles.itemChip, { borderColor: p.color }]}>
-              <View style={[styles.itemDot, { backgroundColor: p.color }]} />
-              <Text style={styles.itemLabel} numberOfLines={1}>
-                {p.label}: {formatArea(p.areaSqM)}
-              </Text>
-              <TouchableOpacity onPress={() => deletePolygon(p.id)}>
-                <Text style={styles.itemDelete}>X</Text>
-              </TouchableOpacity>
-            </View>
-          ))}
-        </ScrollView>
-      )}
-
-      {/* Measurement list */}
-      {measurements.length > 0 && (
-        <ScrollView style={styles.itemList} horizontal showsHorizontalScrollIndicator={false}>
-          {measurements.map((m, i) => (
-            <View key={m.id} style={[styles.itemChip, { borderColor: "#E91E63" }]}>
-              <Text style={styles.itemLabel}>
-                M{i + 1}: {formatDistance(m.distanceM)}
-              </Text>
-              <TouchableOpacity onPress={() => deleteMeasurement(m.id)}>
-                <Text style={styles.itemDelete}>X</Text>
-              </TouchableOpacity>
-            </View>
-          ))}
-        </ScrollView>
-      )}
+      <PolygonList polygons={polygons} onDelete={deletePolygon} />
+      <MeasurementList measurements={measurements} onDelete={deleteMeasurement} />
     </SafeAreaView>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Styles
+// Styles (only screen-level layout styles remain here)
 // ---------------------------------------------------------------------------
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#fff" },
@@ -1041,89 +295,20 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4 },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   title: { fontSize: 18, fontWeight: "700", color: "#1a1a1a" },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
+  exportBtn: {
+    backgroundColor: "#4CAF50", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6,
+  },
+  exportBtnText: { fontSize: 11, fontWeight: "600", color: "#fff" },
+  importBtn: {
+    backgroundColor: "#2196F3", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6,
+  },
+  importBtnText: { fontSize: 11, fontWeight: "600", color: "#fff" },
   statsBadge: {
     fontSize: 10, fontWeight: "600", color: "#666",
     backgroundColor: "#f0f0f0", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10,
   },
-  sub: { fontSize: 11, color: "#888", marginTop: 2 },
 
-  // Plan dropdown trigger
-  dropdownTrigger: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    backgroundColor: "#f5f5f5", borderRadius: 8, borderWidth: 1, borderColor: "#ddd",
-    paddingHorizontal: 12, paddingVertical: 8, marginTop: 6,
-  },
-  dropdownTriggerText: { fontSize: 13, fontWeight: "600", color: "#333", flex: 1 },
-  dropdownArrow: { fontSize: 10, color: "#888", marginLeft: 8 },
-
-  // Plan dropdown modal
-  modalOverlay: {
-    flex: 1, backgroundColor: "rgba(0,0,0,0.4)",
-    justifyContent: "flex-start", paddingTop: 120,
-  },
-  dropdownMenu: {
-    marginHorizontal: 20, backgroundColor: "#fff",
-    borderRadius: 12, maxHeight: 360,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25, shadowRadius: 12, elevation: 8,
-  },
-  dropdownTitle: {
-    fontSize: 14, fontWeight: "700", color: "#333",
-    paddingHorizontal: 16, paddingTop: 14, paddingBottom: 8,
-    borderBottomWidth: 1, borderBottomColor: "#eee",
-  },
-  dropdownScroll: { maxHeight: 300 },
-  dropdownItem: {
-    flexDirection: "row", alignItems: "center",
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: "#f5f5f5",
-  },
-  dropdownItemActive: { backgroundColor: "#EBF5FF" },
-  dropdownItemContent: { flex: 1 },
-  dropdownItemName: { fontSize: 14, fontWeight: "600", color: "#333" },
-  dropdownItemNameActive: { color: "#007AFF" },
-  dropdownItemSite: { fontSize: 11, color: "#888", marginTop: 2 },
-  dropdownCheck: { fontSize: 16, color: "#007AFF", fontWeight: "700" },
-
-  // Tool mode bar
-  toolBar: {
-    flexDirection: "row", alignItems: "center",
-    paddingHorizontal: 12, paddingVertical: 6, gap: 4,
-    borderBottomWidth: 1, borderBottomColor: "#eee",
-  },
-  toolBtn: {
-    flexDirection: "row", alignItems: "center", gap: 3,
-    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
-    backgroundColor: "#f5f5f5",
-  },
-  toolBtnActive: { backgroundColor: "#007AFF" },
-  toolIcon: { fontSize: 14 },
-  toolLabel: { fontSize: 12, fontWeight: "600", color: "#555" },
-  toolLabelActive: { color: "#fff" },
-
-  severityInline: { flexDirection: "row", gap: 4, marginLeft: 8 },
-  sevDot: { width: 22, height: 22, borderRadius: 11, opacity: 0.5 },
-  sevDotActive: { opacity: 1, borderWidth: 2, borderColor: "#fff", transform: [{ scale: 1.15 }] },
-
-  clearBtn: {
-    marginLeft: "auto",
-    paddingHorizontal: 10, paddingVertical: 5,
-    borderRadius: 6, backgroundColor: "#F44336",
-  },
-  clearBtnText: { color: "#fff", fontSize: 11, fontWeight: "700" },
-
-  // Drawing bar
-  drawingBar: {
-    flexDirection: "row", alignItems: "center",
-    paddingHorizontal: 12, paddingVertical: 6,
-    backgroundColor: "#FFF3E0", gap: 8,
-  },
-  drawingText: { fontSize: 12, fontWeight: "600", color: "#E65100", flex: 1 },
-  drawingAction: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6 },
-  drawingActionText: { fontSize: 12, fontWeight: "700", color: "#333" },
-  finishBtn: { backgroundColor: "#4CAF50" },
-
-  // Status bar
   statusBar: {
     paddingHorizontal: 16, paddingVertical: 4, backgroundColor: "#E3F2FD",
   },
@@ -1132,7 +317,6 @@ const styles = StyleSheet.create({
   mapContainer: { flex: 1 },
   map: { flex: 1 },
 
-  // Map mode toggle
   mapToggle: {
     position: "absolute", top: 12, left: 12,
     flexDirection: "row", borderRadius: 8, overflow: "hidden",
@@ -1143,7 +327,6 @@ const styles = StyleSheet.create({
   toggleBtnText: { fontSize: 12, fontWeight: "600", color: "#333" },
   toggleBtnTextActive: { color: "#fff" },
 
-  // Zoom controls
   zoomControls: { position: "absolute", right: 12, bottom: 24, gap: 8 },
   zoomBtn: {
     width: 40, height: 40, borderRadius: 20,
@@ -1151,42 +334,10 @@ const styles = StyleSheet.create({
   },
   zoomBtnText: { color: "#fff", fontSize: 20, fontWeight: "700", lineHeight: 22 },
 
-  // Center button
   centerBtn: {
     position: "absolute", left: 12, bottom: 24,
     backgroundColor: "rgba(0,0,0,0.7)",
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
   },
   centerBtnText: { color: "#fff", fontSize: 11, fontWeight: "600" },
-
-  // Info bar
-  infoBar: {
-    flexDirection: "row", alignItems: "center", backgroundColor: "#fff",
-    paddingHorizontal: 12, paddingVertical: 8,
-    borderTopWidth: 1, borderTopColor: "#e0e0e0", gap: 6,
-  },
-  infoDot: { width: 10, height: 10, borderRadius: 5 },
-  infoText: { flex: 1 },
-  infoTitle: { fontSize: 13, fontWeight: "600", color: "#1a1a1a" },
-  infoDetail: { fontSize: 10, color: "#888", marginTop: 1 },
-  deleteBtn: {
-    backgroundColor: "#F44336", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6,
-  },
-  deleteBtnText: { color: "#fff", fontSize: 11, fontWeight: "600" },
-  closeBtn: { paddingHorizontal: 6, paddingVertical: 4 },
-  closeBtnText: { fontSize: 13, fontWeight: "700", color: "#999" },
-
-  // Item list (polygons / measurements)
-  itemList: {
-    maxHeight: 40, paddingHorizontal: 12,
-    borderTopWidth: 1, borderTopColor: "#f0f0f0",
-  },
-  itemChip: {
-    flexDirection: "row", alignItems: "center", gap: 4,
-    paddingHorizontal: 8, paddingVertical: 6, marginRight: 6,
-    borderRadius: 8, borderWidth: 1.5, backgroundColor: "#fafafa",
-  },
-  itemDot: { width: 8, height: 8, borderRadius: 4 },
-  itemLabel: { fontSize: 11, fontWeight: "600", color: "#333" },
-  itemDelete: { fontSize: 12, fontWeight: "700", color: "#999", marginLeft: 4 },
 });
