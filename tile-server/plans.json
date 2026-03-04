@@ -3,14 +3,84 @@
     "id": "993c8b4f-3e6f-4b65-922b-1ee7886b5e9b",
     "name": "Innovation Centre - Level 1",
     "imagePath": "default_floor_plan.png",
-    "center": [
-      -0.08685,
-      51.52125
-    ],
-    "widthDeg": 0.001,
-    "heightDeg": 0.0006,
+    "corners": {
+      "topLeft": [
+        -0.08740,
+        51.52140
+      ],
+      "topRight": [
+        -0.08540,
+        51.52140
+      ],
+      "bottomRight": [
+        -0.08540,
+        51.52080
+      ],
+      "bottomLeft": [
+        -0.08740,
+        51.52080
+      ]
+    },
     "opacity": 0.85,
+    "rotation": 0,
+    "floor": "Level 1",
+    "building": "Innovation Centre",
+    "site": "10 Finsbury Square, London EC2A 1AF",
+    "crs": "EPSG:4326",
+    "calibrationMethod": "manual",
     "createdAt": "2026-03-04T16:48:31.653Z",
     "updatedAt": "2026-03-04T16:48:31.654Z"
+  },
+  {
+    "id": "a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6",
+    "name": "Startup Hub - Ground Floor",
+    "imagePath": "berlin_floor_plan.png",
+    "corners": {
+      "topLeft": [
+        13.413,
+        52.5218
+      ],
+      "topRight": [
+        13.4153,
+        52.5218
+      ],
+      "bottomRight": [
+        13.4153,
+        52.5211
+      ],
+      "bottomLeft": [
+        13.413,
+        52.5211
+      ]
+    },
+    "opacity": 0.85,
+    "rotation": 0,
+    "floor": "Ground",
+    "building": "Startup Hub",
+    "site": "Alexanderplatz 1, 10178 Berlin",
+    "crs": "EPSG:4326",
+    "calibrationMethod": "manual",
+    "createdAt": "2026-03-04T17:00:00.000Z",
+    "updatedAt": "2026-03-04T17:00:00.000Z"
+  },
+  {
+    "id": "f6e5d4c3-b2a1-9087-6543-210fedcba987",
+    "name": "Design Studio - 1er Étage",
+    "imagePath": "paris_floor_plan.png",
+    "corners": {
+      "topLeft": [2.29550, 48.87410],
+      "topRight": [2.29750, 48.87410],
+      "bottomRight": [2.29750, 48.87350],
+      "bottomLeft": [2.29550, 48.87350]
+    },
+    "opacity": 0.85,
+    "rotation": 0,
+    "floor": "1er Étage",
+    "building": "Design Studio",
+    "site": "Avenue des Champs-Élysées 101, 75008 Paris",
+    "crs": "EPSG:4326",
+    "calibrationMethod": "manual",
+    "createdAt": "2026-03-04T17:00:00.000Z",
+    "updatedAt": "2026-03-04T17:00:00.000Z"
   }
 ]

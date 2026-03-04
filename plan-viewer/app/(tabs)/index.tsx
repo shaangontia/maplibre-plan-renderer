@@ -1,9 +1,11 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import MapLibreGL from "@maplibre/maplibre-react-native";
 import type { Feature, FeatureCollection, Point, Polygon, LineString } from "geojson";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   Platform,
   SafeAreaView,
   ScrollView,
@@ -24,8 +26,18 @@ interface PlanInfo {
   id: string;
   name: string;
   center: [number, number];
+  corners: {
+    topLeft: [number, number];
+    topRight: [number, number];
+    bottomRight: [number, number];
+    bottomLeft: [number, number];
+  };
   bounds: { sw: [number, number]; ne: [number, number] };
   opacity: number;
+  floor?: string;
+  building?: string;
+  site?: string;
+  calibrationMethod?: string;
 }
 
 interface PlanInfoResponse {
@@ -59,6 +71,12 @@ interface Measurement {
   from: Coord;
   to: Coord;
   distanceM: number;
+}
+
+interface PlanAnnotations {
+  defects: Defect[];
+  polygons: AreaPolygon[];
+  measurements: Measurement[];
 }
 
 // ---------------------------------------------------------------------------
@@ -145,6 +163,29 @@ function uid(): string {
 }
 
 // ---------------------------------------------------------------------------
+// AsyncStorage helpers — persist annotations per plan
+// ---------------------------------------------------------------------------
+const STORAGE_PREFIX = "plan_annotations_";
+
+async function loadAnnotations(planId: string): Promise<PlanAnnotations> {
+  try {
+    const raw = await AsyncStorage.getItem(`${STORAGE_PREFIX}${planId}`);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {
+    console.warn("Failed to load annotations:", e);
+  }
+  return { defects: [], polygons: [], measurements: [] };
+}
+
+async function saveAnnotations(planId: string, data: PlanAnnotations): Promise<void> {
+  try {
+    await AsyncStorage.setItem(`${STORAGE_PREFIX}${planId}`, JSON.stringify(data));
+  } catch (e) {
+    console.warn("Failed to save annotations:", e);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 const TILE_SERVER =
@@ -183,6 +224,7 @@ export default function PlanViewerScreen() {
   const [planData, setPlanData] = useState<PlanInfoResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [activePlanId, setActivePlanId] = useState<string | null>(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
 
   // Tool state
   const [toolMode, setToolMode] = useState<ToolMode>("pin");
@@ -202,6 +244,10 @@ export default function PlanViewerScreen() {
 
   const [mapMode, setMapMode] = useState<MapMode>("normal");
 
+  // Track whether initial load from storage is done to avoid overwriting
+  const loadedPlanRef = useRef<string | null>(null);
+  const skipSaveRef = useRef(false);
+
   // Fetch plan info from server
   useEffect(() => {
     (async () => {
@@ -209,7 +255,10 @@ export default function PlanViewerScreen() {
         const resp = await fetch(`${TILE_SERVER}/plan-info`);
         const data: PlanInfoResponse = await resp.json();
         setPlanData(data);
-        if (data.plans.length > 0) setActivePlanId(data.plans[0].id);
+        if (data.plans.length > 0) {
+          const firstId = data.plans[0].id;
+          setActivePlanId(firstId);
+        }
       } catch (err) {
         console.warn("Failed to fetch plan info:", err);
       } finally {
@@ -217,6 +266,31 @@ export default function PlanViewerScreen() {
       }
     })();
   }, []);
+
+  // Load annotations when activePlanId changes
+  useEffect(() => {
+    if (!activePlanId) return;
+    skipSaveRef.current = true;
+    (async () => {
+      const annotations = await loadAnnotations(activePlanId);
+      setDefects(annotations.defects);
+      setPolygons(annotations.polygons);
+      setMeasurements(annotations.measurements);
+      setDrawingCoords([]);
+      setMeasureStart(null);
+      setSelectedDefect(null);
+      loadedPlanRef.current = activePlanId;
+      // Allow saves after state is loaded
+      setTimeout(() => { skipSaveRef.current = false; }, 100);
+    })();
+  }, [activePlanId]);
+
+  // Auto-save annotations whenever defects/polygons/measurements change
+  useEffect(() => {
+    if (!activePlanId || skipSaveRef.current) return;
+    if (loadedPlanRef.current !== activePlanId) return;
+    saveAnnotations(activePlanId, { defects, polygons, measurements });
+  }, [defects, polygons, measurements, activePlanId]);
 
   const activePlan = useMemo(
     () => planData?.plans.find((p) => p.id === activePlanId) ?? null,
@@ -372,7 +446,7 @@ export default function PlanViewerScreen() {
       if (!target) return;
       cameraRef.current?.setCamera({
         centerCoordinate: target.center,
-        zoomLevel: 19,
+        zoomLevel: 18,
         animationDuration: 500,
       });
     },
@@ -472,16 +546,18 @@ export default function PlanViewerScreen() {
   }, []);
 
   const clearAll = useCallback(() => {
-    Alert.alert("Clear All", "Remove all polygons & measurements?", [
+    Alert.alert("Clear All", "Remove all pins, polygons & measurements?", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Clear",
         style: "destructive",
         onPress: () => {
+          setDefects([]);
           setPolygons([]);
           setMeasurements([]);
           setDrawingCoords([]);
           setMeasureStart(null);
+          setSelectedDefect(null);
         },
       },
     ]);
@@ -501,7 +577,9 @@ export default function PlanViewerScreen() {
   const selectPlan = useCallback(
     (plan: PlanInfo) => {
       setActivePlanId(plan.id);
-      flyToPlan(plan);
+      setDropdownOpen(false);
+      // flyToPlan will fire after annotations load via useEffect
+      setTimeout(() => flyToPlan(plan), 200);
     },
     [flyToPlan]
   );
@@ -528,38 +606,82 @@ export default function PlanViewerScreen() {
 
   return (
     <SafeAreaView style={styles.root}>
-      {/* Header */}
+      {/* Header with plan dropdown */}
       <View style={styles.header}>
-        <Text style={styles.title}>Plan Viewer</Text>
-        <Text style={styles.sub}>
-          {activePlan ? activePlan.name : "No plans loaded"} |{" "}
-          {defects.length} pins | {polygons.length} areas | {measurements.length} measures
-        </Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.title}>Plan Viewer</Text>
+          <Text style={styles.statsBadge}>
+            {defects.length}P {polygons.length}A {measurements.length}M
+          </Text>
+        </View>
+
+        {/* Plan dropdown trigger */}
+        {planData && planData.plans.length > 0 && (
+          <TouchableOpacity
+            style={styles.dropdownTrigger}
+            onPress={() => setDropdownOpen(true)}
+          >
+            <Text style={styles.dropdownTriggerText} numberOfLines={1}>
+              {activePlan ? activePlan.name : "Select plan..."}
+            </Text>
+            <Text style={styles.dropdownArrow}>{"\u25BC"}</Text>
+          </TouchableOpacity>
+        )}
+
+        {activePlan?.site && (
+          <Text style={styles.sub}>{activePlan.site}</Text>
+        )}
       </View>
 
-      {/* Plan picker */}
-      {planData && planData.plans.length > 1 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.planPicker}
+      {/* Plan dropdown modal */}
+      <Modal
+        visible={dropdownOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDropdownOpen(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setDropdownOpen(false)}
         >
-          {planData.plans.map((plan) => (
-            <TouchableOpacity
-              key={plan.id}
-              style={[styles.planChip, activePlanId === plan.id && styles.planChipActive]}
-              onPress={() => selectPlan(plan)}
-            >
-              <Text
-                style={[styles.planChipText, activePlanId === plan.id && styles.planChipTextActive]}
-                numberOfLines={1}
-              >
-                {plan.name}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      )}
+          <View style={styles.dropdownMenu}>
+            <Text style={styles.dropdownTitle}>Select Plan</Text>
+            <ScrollView style={styles.dropdownScroll}>
+              {planData?.plans.map((plan) => (
+                <TouchableOpacity
+                  key={plan.id}
+                  style={[
+                    styles.dropdownItem,
+                    activePlanId === plan.id && styles.dropdownItemActive,
+                  ]}
+                  onPress={() => selectPlan(plan)}
+                >
+                  <View style={styles.dropdownItemContent}>
+                    <Text
+                      style={[
+                        styles.dropdownItemName,
+                        activePlanId === plan.id && styles.dropdownItemNameActive,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {plan.name}
+                    </Text>
+                    {plan.site && (
+                      <Text style={styles.dropdownItemSite} numberOfLines={1}>
+                        {plan.site}
+                      </Text>
+                    )}
+                  </View>
+                  {activePlanId === plan.id && (
+                    <Text style={styles.dropdownCheck}>{"\u2713"}</Text>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Tool mode selector */}
       <View style={styles.toolBar}>
@@ -597,7 +719,7 @@ export default function PlanViewerScreen() {
         )}
 
         {/* Clear all */}
-        {(polygons.length > 0 || measurements.length > 0) && (
+        {(defects.length > 0 || polygons.length > 0 || measurements.length > 0) && (
           <TouchableOpacity style={styles.clearBtn} onPress={clearAll}>
             <Text style={styles.clearBtnText}>Clear</Text>
           </TouchableOpacity>
@@ -654,12 +776,12 @@ export default function PlanViewerScreen() {
         >
           <MapLibreGL.Camera
             ref={cameraRef}
-            defaultSettings={{ centerCoordinate: mapCenter, zoomLevel: 19 }}
+            defaultSettings={{ centerCoordinate: mapCenter, zoomLevel: 18 }}
             minZoomLevel={2}
             maxZoomLevel={22}
           />
 
-          {/* Completed polygons — fill */}
+          {/* Completed polygons — fill + outline */}
           <MapLibreGL.ShapeSource id="polygons-fill" shape={polygonsGeoJSON}>
             <MapLibreGL.FillLayer
               id="polygons-fill-layer"
@@ -672,19 +794,32 @@ export default function PlanViewerScreen() {
               id="polygons-outline-layer"
               style={{
                 lineColor: ["get", "color"],
-                lineWidth: 2,
+                lineWidth: [
+                  "interpolate", ["linear"], ["zoom"],
+                  14, 1,
+                  17, 2,
+                  20, 3,
+                ],
                 lineOpacity: 0.9,
               }}
             />
           </MapLibreGL.ShapeSource>
 
-          {/* Polygon labels */}
+          {/* Polygon labels — zoom-responsive text size */}
           <MapLibreGL.ShapeSource id="polygon-labels" shape={polygonLabelsGeoJSON}>
             <MapLibreGL.SymbolLayer
               id="polygon-labels-layer"
+              minZoomLevel={15}
               style={{
                 textField: ["get", "label"],
-                textSize: 11,
+                textSize: [
+                  "interpolate", ["linear"], ["zoom"],
+                  15, 8,
+                  17, 10,
+                  18, 12,
+                  20, 14,
+                  22, 16,
+                ],
                 textColor: "#1a1a1a",
                 textHaloColor: "#ffffff",
                 textHaloWidth: 1.5,
@@ -706,7 +841,12 @@ export default function PlanViewerScreen() {
             <MapLibreGL.CircleLayer
               id="drawing-points-layer"
               style={{
-                circleRadius: 6,
+                circleRadius: [
+                  "interpolate", ["linear"], ["zoom"],
+                  14, 3,
+                  18, 6,
+                  22, 10,
+                ],
                 circleColor: "#FF5722",
                 circleStrokeColor: "#fff",
                 circleStrokeWidth: 2,
@@ -720,18 +860,30 @@ export default function PlanViewerScreen() {
               id="measure-lines-layer"
               style={{
                 lineColor: "#E91E63",
-                lineWidth: 2.5,
+                lineWidth: [
+                  "interpolate", ["linear"], ["zoom"],
+                  14, 1.5,
+                  18, 2.5,
+                  22, 4,
+                ],
               }}
             />
           </MapLibreGL.ShapeSource>
 
-          {/* Measurement labels */}
+          {/* Measurement labels — zoom-responsive */}
           <MapLibreGL.ShapeSource id="measure-labels" shape={measureLabelsGeoJSON}>
             <MapLibreGL.SymbolLayer
               id="measure-labels-layer"
+              minZoomLevel={15}
               style={{
                 textField: ["get", "label"],
-                textSize: 13,
+                textSize: [
+                  "interpolate", ["linear"], ["zoom"],
+                  15, 9,
+                  17, 11,
+                  18, 13,
+                  20, 15,
+                ],
                 textColor: "#E91E63",
                 textHaloColor: "#ffffff",
                 textHaloWidth: 2,
@@ -747,7 +899,12 @@ export default function PlanViewerScreen() {
             <MapLibreGL.CircleLayer
               id="measure-pending-layer"
               style={{
-                circleRadius: 7,
+                circleRadius: [
+                  "interpolate", ["linear"], ["zoom"],
+                  14, 4,
+                  18, 7,
+                  22, 11,
+                ],
                 circleColor: "#E91E63",
                 circleStrokeColor: "#fff",
                 circleStrokeWidth: 2,
@@ -755,12 +912,18 @@ export default function PlanViewerScreen() {
             />
           </MapLibreGL.ShapeSource>
 
-          {/* Defect pins */}
+          {/* Defect pins — zoom-responsive */}
           <MapLibreGL.ShapeSource id="defects" shape={defectsGeoJSON} onPress={handlePinPress}>
             <MapLibreGL.CircleLayer
               id="defects-circle"
               style={{
-                circleRadius: 8,
+                circleRadius: [
+                  "interpolate", ["linear"], ["zoom"],
+                  14, 4,
+                  17, 6,
+                  19, 8,
+                  22, 12,
+                ],
                 circleColor: ["get", "color"],
                 circleStrokeColor: "#ffffff",
                 circleStrokeWidth: 2.5,
@@ -875,19 +1038,52 @@ const styles = StyleSheet.create({
   loadingContainer: { alignItems: "center", justifyContent: "center" },
   loadingText: { marginTop: 12, fontSize: 14, color: "#666" },
 
-  header: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 2 },
+  header: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4 },
+  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   title: { fontSize: 18, fontWeight: "700", color: "#1a1a1a" },
-  sub: { fontSize: 11, color: "#666", marginTop: 1 },
-
-  // Plan picker
-  planPicker: { paddingHorizontal: 16, paddingVertical: 4, gap: 8 },
-  planChip: {
-    paddingHorizontal: 12, paddingVertical: 5, borderRadius: 16,
-    backgroundColor: "#eee", borderWidth: 1, borderColor: "#ddd",
+  statsBadge: {
+    fontSize: 10, fontWeight: "600", color: "#666",
+    backgroundColor: "#f0f0f0", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10,
   },
-  planChipActive: { backgroundColor: "#007AFF", borderColor: "#007AFF" },
-  planChipText: { fontSize: 12, fontWeight: "500", color: "#555" },
-  planChipTextActive: { color: "#fff", fontWeight: "700" },
+  sub: { fontSize: 11, color: "#888", marginTop: 2 },
+
+  // Plan dropdown trigger
+  dropdownTrigger: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    backgroundColor: "#f5f5f5", borderRadius: 8, borderWidth: 1, borderColor: "#ddd",
+    paddingHorizontal: 12, paddingVertical: 8, marginTop: 6,
+  },
+  dropdownTriggerText: { fontSize: 13, fontWeight: "600", color: "#333", flex: 1 },
+  dropdownArrow: { fontSize: 10, color: "#888", marginLeft: 8 },
+
+  // Plan dropdown modal
+  modalOverlay: {
+    flex: 1, backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "flex-start", paddingTop: 120,
+  },
+  dropdownMenu: {
+    marginHorizontal: 20, backgroundColor: "#fff",
+    borderRadius: 12, maxHeight: 360,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25, shadowRadius: 12, elevation: 8,
+  },
+  dropdownTitle: {
+    fontSize: 14, fontWeight: "700", color: "#333",
+    paddingHorizontal: 16, paddingTop: 14, paddingBottom: 8,
+    borderBottomWidth: 1, borderBottomColor: "#eee",
+  },
+  dropdownScroll: { maxHeight: 300 },
+  dropdownItem: {
+    flexDirection: "row", alignItems: "center",
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderBottomWidth: 1, borderBottomColor: "#f5f5f5",
+  },
+  dropdownItemActive: { backgroundColor: "#EBF5FF" },
+  dropdownItemContent: { flex: 1 },
+  dropdownItemName: { fontSize: 14, fontWeight: "600", color: "#333" },
+  dropdownItemNameActive: { color: "#007AFF" },
+  dropdownItemSite: { fontSize: 11, color: "#888", marginTop: 2 },
+  dropdownCheck: { fontSize: 16, color: "#007AFF", fontWeight: "700" },
 
   // Tool mode bar
   toolBar: {
