@@ -12,6 +12,8 @@
     "supportsTablet": true,
     "bundleIdentifier": "com.anonymous.plan-viewer",
       "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Plan Viewer uses your location to show where you are on the plan and track your movement.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Plan Viewer uses your location to show where you are on the plan and track your movement.",
         "NSAppTransportSecurity": {
           "NSExceptionDomains": {
             "localhost": {
@@ -34,7 +36,8 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": ["android.permission.ACCESS_FINE_LOCATION", "android.permission.ACCESS_COARSE_LOCATION"]
     },
     "web": {
       "output": "static",
@@ -54,7 +57,13 @@
           }
         }
       ],
-      "@maplibre/maplibre-react-native"
+      "@maplibre/maplibre-react-native",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Plan Viewer uses your location to show where you are on the plan and track your movement."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

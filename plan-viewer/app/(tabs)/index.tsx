@@ -16,6 +16,7 @@ import { usePlanData } from "./plan-viewer/usePlanData";
 import { useAnnotations } from "./plan-viewer/useAnnotations";
 import { useExportImport } from "./plan-viewer/useExportImport";
 import { useDetectAreas } from "./plan-viewer/useDetectAreas";
+import { useUserLocation } from "./plan-viewer/useUserLocation";
 import MapLayers from "./plan-viewer/MapLayers";
 import { ToolBar, DrawingBar } from "./plan-viewer/ToolBar";
 import PlanDropdown from "./plan-viewer/PlanDropdown";
@@ -77,6 +78,17 @@ export default function PlanViewerScreen() {
     acceptDetectedAreas,
   } = useDetectAreas(activePlanId);
 
+  const {
+    location: userLocation,
+    permissionGranted,
+    simMode,
+    following,
+    toggleFollowing,
+    requestPermission,
+    startSim,
+    moveSimulated,
+  } = useUserLocation();
+
   // ------ Callbacks ------
   const flyToPlan = useCallback(
     (plan?: PlanInfo | null) => {
@@ -122,6 +134,32 @@ export default function PlanViewerScreen() {
     },
     [defects, setSelectedDefect]
   );
+
+  const handleClusterPress = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async (e: any) => {
+      const feature = e?.features?.[0];
+      if (!feature) return;
+      const [lon, lat] = feature.geometry.coordinates;
+      const currentZoom = await mapRef.current?.getZoom();
+      cameraRef.current?.setCamera({
+        centerCoordinate: [lon, lat],
+        zoomLevel: Math.min((currentZoom ?? 17) + 2, 22),
+        animationDuration: 400,
+      });
+    },
+    []
+  );
+
+  // Follow-me: whenever location updates and following is on, re-center camera
+  React.useEffect(() => {
+    if (following && userLocation) {
+      cameraRef.current?.setCamera({
+        centerCoordinate: [userLocation.longitude, userLocation.latitude],
+        animationDuration: 600,
+      });
+    }
+  }, [following, userLocation]);
 
   const selectPlan = useCallback(
     (plan: PlanInfo) => {
@@ -235,7 +273,9 @@ export default function PlanViewerScreen() {
             drawingCoords={drawingCoords}
             measureStart={measureStart}
             detectedAreas={detectedAreas}
+            userLocation={userLocation}
             onPinPress={handlePinPress}
+            onClusterPress={handleClusterPress}
           />
         </MapLibreGL.MapView>
 
@@ -279,6 +319,54 @@ export default function PlanViewerScreen() {
         <TouchableOpacity style={styles.centerBtn} onPress={() => flyToPlan()}>
           <Text style={styles.centerBtnText}>Center</Text>
         </TouchableOpacity>
+
+        {/* Location button — request permission or toggle follow mode */}
+        <TouchableOpacity
+          style={[styles.locationBtn, following && styles.locationBtnActive]}
+          onPress={permissionGranted ? toggleFollowing : requestPermission}
+        >
+          <Text style={styles.locationBtnIcon}>{permissionGranted ? (following ? "📍" : "🔵") : "📍"}</Text>
+          <Text style={[styles.locationBtnLabel, following && styles.locationBtnLabelActive]}>
+            {!permissionGranted ? "Enable Location" : following ? "Following" : "My Location"}
+          </Text>
+        </TouchableOpacity>
+
+        {/* Simulate Location button — places dot at plan center */}
+        <TouchableOpacity
+          style={[styles.simBtn, simMode && styles.simBtnActive]}
+          onPress={() => {
+            if (activePlan) {
+              const c = activePlan.center as [number, number];
+              startSim(c[0], c[1]);
+            }
+          }}
+        >
+          <Text style={styles.simBtnIcon}>🎮</Text>
+          <Text style={[styles.simBtnLabel, simMode && styles.simBtnLabelActive]}>
+            {simMode ? "Simulating" : "Simulate"}
+          </Text>
+        </TouchableOpacity>
+
+        {/* D-pad — only visible in sim mode */}
+        {simMode && (
+          <View style={styles.dpad}>
+            <TouchableOpacity style={styles.dpadBtn} onPress={() => moveSimulated("north")}>
+              <Text style={styles.dpadText}>▲</Text>
+            </TouchableOpacity>
+            <View style={styles.dpadMiddleRow}>
+              <TouchableOpacity style={styles.dpadBtn} onPress={() => moveSimulated("west")}>
+                <Text style={styles.dpadText}>◀</Text>
+              </TouchableOpacity>
+              <View style={styles.dpadCenter} />
+              <TouchableOpacity style={styles.dpadBtn} onPress={() => moveSimulated("east")}>
+                <Text style={styles.dpadText}>▶</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity style={styles.dpadBtn} onPress={() => moveSimulated("south")}>
+              <Text style={styles.dpadText}>▼</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Detect Areas FAB */}
         <TouchableOpacity
@@ -383,6 +471,43 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
   },
   centerBtnText: { color: "#fff", fontSize: 11, fontWeight: "600" },
+
+  simBtn: {
+    position: "absolute", left: 12, bottom: 156,
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
+    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 4, elevation: 4,
+  },
+  simBtnActive: { backgroundColor: "#6A1B9A" },
+  simBtnIcon: { fontSize: 14 },
+  simBtnLabel: { color: "#fff", fontSize: 11, fontWeight: "600" },
+  simBtnLabelActive: { color: "#E1BEE7" },
+
+  dpad: {
+    position: "absolute", right: 12, bottom: 100,
+    alignItems: "center", gap: 2,
+  },
+  dpadMiddleRow: { flexDirection: "row", alignItems: "center", gap: 2 },
+  dpadCenter: { width: 44, height: 44 },
+  dpadBtn: {
+    width: 44, height: 44, borderRadius: 8,
+    backgroundColor: "rgba(0,0,0,0.75)",
+    alignItems: "center", justifyContent: "center",
+  },
+  dpadText: { color: "#fff", fontSize: 18, lineHeight: 22 },
+
+  locationBtn: {
+    position: "absolute", left: 12, bottom: 112,
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
+    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 4, elevation: 4,
+  },
+  locationBtnActive: { backgroundColor: "#1565C0" },
+  locationBtnIcon: { fontSize: 14 },
+  locationBtnLabel: { color: "#fff", fontSize: 11, fontWeight: "600" },
+  locationBtnLabelActive: { color: "#fff" },
 
   detectBtn: {
     position: "absolute", left: 12, bottom: 68,

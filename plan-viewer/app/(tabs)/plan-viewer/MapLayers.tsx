@@ -3,6 +3,7 @@ import type { FeatureCollection, Point, Polygon, LineString } from "geojson";
 import React, { useMemo } from "react";
 import type { Defect, AreaPolygon, Measurement, Coord } from "./types";
 import type { DetectedArea } from "./useDetectAreas";
+import type { UserLocation } from "./useUserLocation";
 import { SEVERITY_COLORS } from "./constants";
 import {
   formatArea,
@@ -19,8 +20,11 @@ interface MapLayersProps {
   drawingCoords: Coord[];
   measureStart: Coord | null;
   detectedAreas: DetectedArea[];
+  userLocation: UserLocation | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onPinPress: (e: any) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onClusterPress?: (e: any) => void;
 }
 
 export default function MapLayers({
@@ -30,8 +34,35 @@ export default function MapLayers({
   drawingCoords,
   measureStart,
   detectedAreas,
+  userLocation,
   onPinPress,
+  onClusterPress,
 }: MapLayersProps) {
+  // ------ GeoJSON: user location dot ------
+  const userLocationGeoJSON = useMemo<FeatureCollection<Point>>(
+    () => ({
+      type: "FeatureCollection",
+      features: userLocation
+        ? [
+            {
+              type: "Feature" as const,
+              id: "user-location",
+              properties: {
+                accuracy: userLocation.accuracy ?? 8,
+                heading: userLocation.heading ?? 0,
+                hasHeading: userLocation.heading != null ? 1 : 0,
+              },
+              geometry: {
+                type: "Point" as const,
+                coordinates: [userLocation.longitude, userLocation.latitude],
+              },
+            },
+          ]
+        : [],
+    }),
+    [userLocation]
+  );
+
   // ------ GeoJSON: defect pins ------
   const defectsGeoJSON = useMemo<FeatureCollection<Point>>(
     () => ({
@@ -376,10 +407,109 @@ export default function MapLayers({
         />
       </MapLibreGL.ShapeSource>
 
-      {/* Defect pins — zoom-responsive */}
-      <MapLibreGL.ShapeSource id="defects" shape={defectsGeoJSON} onPress={onPinPress}>
+      {/* User location — blue dot with accuracy halo */}
+      <MapLibreGL.ShapeSource id="user-location" shape={userLocationGeoJSON}>
+        {/* Accuracy halo */}
+        <MapLibreGL.CircleLayer
+          id="user-location-halo"
+          style={{
+            circleRadius: 16,
+            circleColor: "#2979FF",
+            circleOpacity: 0.18,
+            circleStrokeColor: "#2979FF",
+            circleStrokeWidth: 1,
+            circleStrokeOpacity: 0.35,
+          }}
+        />
+        {/* White outline ring */}
+        <MapLibreGL.CircleLayer
+          id="user-location-outline"
+          style={{
+            circleRadius: 10,
+            circleColor: "#ffffff",
+            circleOpacity: 1,
+          }}
+        />
+        {/* Blue dot */}
+        <MapLibreGL.CircleLayer
+          id="user-location-dot"
+          style={{
+            circleRadius: 7,
+            circleColor: "#2979FF",
+            circleOpacity: 1,
+          }}
+        />
+      </MapLibreGL.ShapeSource>
+
+      {/* Defect pins — clustered on zoom out, individual pins on zoom in */}
+      <MapLibreGL.ShapeSource
+        id="defects"
+        shape={defectsGeoJSON}
+        onPress={(e) => {
+          // Route to cluster handler or pin handler based on feature type
+          const f = e?.features?.[0];
+          if (f?.properties?.cluster) {
+            onClusterPress?.(e);
+          } else {
+            onPinPress(e);
+          }
+        }}
+        cluster
+        clusterRadius={40}
+        clusterMaxZoomLevel={17}
+        clusterProperties={{
+          // Accumulate severities so we can color the cluster bubble
+          hasCritical: ["+", ["case", ["==", ["get", "severity"], "critical"], 1, 0]],
+          hasHigh:     ["+", ["case", ["==", ["get", "severity"], "high"],     1, 0]],
+        }}
+      >
+        {/* Cluster bubble — size + color scale with count */}
+        <MapLibreGL.CircleLayer
+          id="clusters-circle"
+          belowLayerID="defects-circle"
+          filter={["has", "point_count"]}
+          style={{
+            circleRadius: [
+              "step", ["get", "point_count"],
+              16,  2,
+              20,  5,
+              26, 10,
+              32,
+            ],
+            circleColor: [
+              "case",
+              [">", ["get", "hasCritical"], 0], "#E53935",
+              [">", ["get", "hasHigh"],     0], "#FF6F00",
+              "#1565C0",
+            ],
+            circleOpacity: 0.92,
+            circleStrokeColor: "#ffffff",
+            circleStrokeWidth: 2.5,
+          }}
+        />
+
+        {/* Cluster count label — shown centred on every cluster bubble */}
+        <MapLibreGL.SymbolLayer
+          id="clusters-count"
+          aboveLayerID="clusters-circle"
+          filter={["has", "point_count"]}
+          style={{
+            textField: ["to-string", ["get", "point_count"]],
+            textSize: 14,
+            textColor: "#ffffff",
+            textHaloColor: "rgba(0,0,0,0.4)",
+            textHaloWidth: 1.5,
+            textAllowOverlap: true,
+            textIgnorePlacement: true,
+            textAnchor: "center",
+            textMaxWidth: 100,
+          }}
+        />
+
+        {/* Individual pin — only shown for unclustered points */}
         <MapLibreGL.CircleLayer
           id="defects-circle"
+          filter={["!", ["has", "point_count"]]}
           style={{
             circleRadius: [
               "interpolate", ["linear"], ["zoom"],
