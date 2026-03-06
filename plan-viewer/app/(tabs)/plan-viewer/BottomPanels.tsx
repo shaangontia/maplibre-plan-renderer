@@ -1,6 +1,7 @@
 import React from "react";
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import type { Defect, AreaPolygon, Measurement } from "./types";
+import type { DetectedArea } from "./useDetectAreas";
 import { SEVERITY_COLORS } from "./constants";
 import { formatArea, formatDistance } from "./geoUtils";
 
@@ -85,6 +86,39 @@ export function MeasurementList({ measurements, onDelete }: MeasurementListProps
   );
 }
 
+interface DetectedAreasListProps {
+  areas: DetectedArea[];
+  onAccept: () => void;
+  onDiscard: () => void;
+}
+
+export function DetectedAreasList({ areas, onAccept, onDiscard }: DetectedAreasListProps) {
+  return (
+    <View style={styles.detectedPanel}>
+      <View style={styles.detectedHeader}>
+        <Text style={styles.detectedTitle}>🔍 {areas.length} room{areas.length !== 1 ? "s" : ""} detected</Text>
+        <View style={styles.detectedActions}>
+          <TouchableOpacity style={styles.acceptBtn} onPress={onAccept}>
+            <Text style={styles.acceptBtnText}>✓ Add to Areas</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.discardBtn} onPress={onDiscard}>
+            <Text style={styles.discardBtnText}>✕ Discard</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.detectedScroll}>
+        {areas.map((a) => (
+          <View key={a.id} style={[styles.detectedChip, { borderColor: a.color }]}>
+            <View style={[styles.detectedDot, { backgroundColor: a.color }]} />
+            <Text style={styles.detectedLabel}>{a.label}</Text>
+            <Text style={styles.detectedArea}>{formatArea(a.areaSqM)}</Text>
+          </View>
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   infoBar: {
     flexDirection: "row", alignItems: "center", backgroundColor: "#fff",
@@ -114,4 +148,33 @@ const styles = StyleSheet.create({
   itemDot: { width: 8, height: 8, borderRadius: 4 },
   itemLabel: { fontSize: 11, fontWeight: "600", color: "#333" },
   itemDelete: { fontSize: 12, fontWeight: "700", color: "#999", marginLeft: 4 },
+
+  detectedPanel: {
+    backgroundColor: "#E0F7FA",
+    borderTopWidth: 1, borderTopColor: "#80DEEA",
+    paddingTop: 8, paddingBottom: 6,
+  },
+  detectedHeader: {
+    flexDirection: "row", alignItems: "center",
+    paddingHorizontal: 12, marginBottom: 6, gap: 8,
+  },
+  detectedTitle: { fontSize: 12, fontWeight: "700", color: "#006064", flex: 1 },
+  detectedActions: { flexDirection: "row", gap: 6 },
+  acceptBtn: {
+    backgroundColor: "#00897B", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6,
+  },
+  acceptBtnText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+  discardBtn: {
+    backgroundColor: "#B0BEC5", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6,
+  },
+  discardBtnText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+  detectedScroll: { paddingHorizontal: 12, maxHeight: 40 },
+  detectedChip: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    paddingHorizontal: 8, paddingVertical: 5, marginRight: 6,
+    borderRadius: 8, borderWidth: 1.5, backgroundColor: "#fff",
+  },
+  detectedDot: { width: 8, height: 8, borderRadius: 4 },
+  detectedLabel: { fontSize: 11, fontWeight: "600", color: "#006064" },
+  detectedArea: { fontSize: 10, color: "#555", marginLeft: 2 },
 });

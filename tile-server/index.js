@@ -806,6 +806,170 @@ app.delete("/api/plans/:id", (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Detect areas (rooms) from the plan image
+// ---------------------------------------------------------------------------
+app.get("/api/plans/:id/detect-areas", async (req, res) => {
+  const plans = readDb();
+  const plan = plans.find((p) => p.id === req.params.id);
+  if (!plan) return res.status(404).json({ error: "Plan not found" });
+
+  const imgPath = path.join(UPLOADS_DIR, plan.imagePath);
+  if (!fs.existsSync(imgPath)) {
+    return res.status(404).json({ error: "Image file missing" });
+  }
+
+  try {
+    const sharp = require("sharp");
+
+    // ── Step 1: Downsample to a manageable working resolution ──────────────
+    const WORK_W = 650;
+    const WORK_H = 484;
+    const { data, info } = await sharp(imgPath)
+      .resize(WORK_W, WORK_H, { fit: "fill" })
+      .greyscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    const { width, height } = info;
+    const idx = (x, y) => y * width + x;
+
+    // ── Step 2: Build wall map — pixels darker than 160 are walls ──────────
+    const isWall = new Uint8Array(width * height);
+    for (let i = 0; i < data.length; i++) {
+      isWall[i] = data[i] < 160 ? 1 : 0;
+    }
+
+    // ── Step 3: Dilate walls by DILATE pixels to close doorway gaps ────────
+    // This is the key fix: small gaps between rooms (doorways) get sealed so
+    // flood-fill from the outside cannot enter individual rooms.
+    const DILATE = 4;
+    const wallDilated = new Uint8Array(width * height);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        let wall = false;
+        outer: for (let dy = -DILATE; dy <= DILATE && !wall; dy++) {
+          for (let dx = -DILATE; dx <= DILATE && !wall; dx++) {
+            const nx = x + dx, ny = y + dy;
+            if (nx >= 0 && ny >= 0 && nx < width && ny < height && isWall[idx(nx, ny)]) {
+              wall = true;
+            }
+          }
+        }
+        wallDilated[idx(x, y)] = wall ? 1 : 0;
+      }
+    }
+
+    // ── Step 4: Flood-fill from all border pixels to mark "outside" ────────
+    const outside = new Uint8Array(width * height);
+    const borderStack = [];
+    for (let x = 0; x < width; x++) {
+      borderStack.push([x, 0], [x, height - 1]);
+    }
+    for (let y = 1; y < height - 1; y++) {
+      borderStack.push([0, y], [width - 1, y]);
+    }
+    while (borderStack.length > 0) {
+      const [x, y] = borderStack.pop();
+      if (x < 0 || y < 0 || x >= width || y >= height) continue;
+      if (wallDilated[idx(x, y)] || outside[idx(x, y)]) continue;
+      outside[idx(x, y)] = 1;
+      borderStack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+    }
+
+    // ── Step 5: Label enclosed regions (not wall, not outside) as rooms ────
+    const labels = new Int32Array(width * height).fill(-1);
+    let nextLabel = 0;
+    const boxes = new Map();
+
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        const i = idx(x, y);
+        if (wallDilated[i] || outside[i] || labels[i] !== -1) continue;
+
+        const label = nextLabel++;
+        const stack = [[x, y]];
+        while (stack.length > 0) {
+          const [cx, cy] = stack.pop();
+          if (cx < 0 || cy < 0 || cx >= width || cy >= height) continue;
+          const ci = idx(cx, cy);
+          if (wallDilated[ci] || outside[ci] || labels[ci] !== -1) continue;
+          labels[ci] = label;
+          if (!boxes.has(label)) {
+            boxes.set(label, { minX: cx, minY: cy, maxX: cx, maxY: cy, count: 1 });
+          } else {
+            const b = boxes.get(label);
+            b.count++;
+            if (cx < b.minX) b.minX = cx;
+            if (cy < b.minY) b.minY = cy;
+            if (cx > b.maxX) b.maxX = cx;
+            if (cy > b.maxY) b.maxY = cy;
+          }
+          stack.push([cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]);
+        }
+      }
+    }
+
+    // ── Step 6: Filter by size — must be a plausible room ─────────────────
+    const totalPixels = width * height;
+    const minPixels = totalPixels * 0.003;  // at least 0.3% of image
+    const maxPixels = totalPixels * 0.70;   // less than 70% (not background)
+    const minDimPx  = Math.min(width, height) * 0.02; // at least 2% of short side
+
+    const rooms = [];
+    for (const [, box] of boxes) {
+      const bw = box.maxX - box.minX;
+      const bh = box.maxY - box.minY;
+      if (box.count < minPixels || box.count > maxPixels) continue;
+      if (bw < minDimPx || bh < minDimPx) continue;
+      rooms.push(box);
+    }
+
+    // Sort top-to-bottom, left-to-right for consistent labelling
+    rooms.sort((a, b) => a.minY - b.minY || a.minX - b.minX);
+
+    // Map pixel bounding box corners → geo-coordinates using bilinear interpolation
+    const { topLeft, topRight, bottomRight, bottomLeft } = plan.corners;
+
+    const pixelToGeo = (px, py) => {
+      const u = px / width;
+      const v = py / height;
+      // Bilinear interpolation across the four corners
+      const lon =
+        (1 - u) * (1 - v) * topLeft[0] +
+        u       * (1 - v) * topRight[0] +
+        u       * v       * bottomRight[0] +
+        (1 - u) * v       * bottomLeft[0];
+      const lat =
+        (1 - u) * (1 - v) * topLeft[1] +
+        u       * (1 - v) * topRight[1] +
+        u       * v       * bottomRight[1] +
+        (1 - u) * v       * bottomLeft[1];
+      return [lon, lat];
+    };
+
+    const areas = rooms.map((box, i) => {
+      const tl = pixelToGeo(box.minX, box.minY);
+      const tr = pixelToGeo(box.maxX, box.minY);
+      const br = pixelToGeo(box.maxX, box.maxY);
+      const bl = pixelToGeo(box.minX, box.maxY);
+      return {
+        id: `detected-${i}`,
+        label: `Room ${i + 1}`,
+        coords: [tl, tr, br, bl],
+        pixelBounds: { minX: box.minX, minY: box.minY, maxX: box.maxX, maxY: box.maxY },
+        pixelCount: box.count,
+      };
+    });
+
+    console.log(`Detected ${areas.length} rooms in plan: ${plan.name}`);
+    res.json({ planId: plan.id, count: areas.length, areas });
+  } catch (err) {
+    console.error("detect-areas error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Serve plan images
 // ---------------------------------------------------------------------------
 app.get("/api/plans/:id/image", (req, res) => {

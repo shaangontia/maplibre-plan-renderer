@@ -2,6 +2,7 @@ import MapLibreGL from "@maplibre/maplibre-react-native";
 import type { FeatureCollection, Point, Polygon, LineString } from "geojson";
 import React, { useMemo } from "react";
 import type { Defect, AreaPolygon, Measurement, Coord } from "./types";
+import type { DetectedArea } from "./useDetectAreas";
 import { SEVERITY_COLORS } from "./constants";
 import {
   formatArea,
@@ -17,6 +18,7 @@ interface MapLayersProps {
   measurements: Measurement[];
   drawingCoords: Coord[];
   measureStart: Coord | null;
+  detectedAreas: DetectedArea[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onPinPress: (e: any) => void;
 }
@@ -27,6 +29,7 @@ export default function MapLayers({
   measurements,
   drawingCoords,
   measureStart,
+  detectedAreas,
   onPinPress,
 }: MapLayersProps) {
   // ------ GeoJSON: defect pins ------
@@ -46,6 +49,39 @@ export default function MapLayers({
       })),
     }),
     [defects]
+  );
+
+  // ------ GeoJSON: detected areas (auto-detected rooms) ------
+  const detectedGeoJSON = useMemo<FeatureCollection<Polygon>>(
+    () => ({
+      type: "FeatureCollection",
+      features: detectedAreas.map((a) => ({
+        type: "Feature" as const,
+        id: a.id,
+        properties: { color: a.color, label: a.label },
+        geometry: {
+          type: "Polygon" as const,
+          coordinates: [[...a.coords, a.coords[0]]],
+        },
+      })),
+    }),
+    [detectedAreas]
+  );
+
+  const detectedLabelsGeoJSON = useMemo<FeatureCollection<Point>>(
+    () => ({
+      type: "FeatureCollection",
+      features: detectedAreas.map((a) => {
+        const c = centroid(a.coords);
+        return {
+          type: "Feature" as const,
+          id: `dlabel-${a.id}`,
+          properties: { label: `${a.label}\n${formatArea(a.areaSqM)}` },
+          geometry: { type: "Point" as const, coordinates: c },
+        };
+      }),
+    }),
+    [detectedAreas]
   );
 
   // ------ GeoJSON: completed polygons ------
@@ -168,6 +204,47 @@ export default function MapLayers({
 
   return (
     <>
+      {/* Detected areas — teal dashed outline + light fill */}
+      <MapLibreGL.ShapeSource id="detected-areas" shape={detectedGeoJSON}>
+        <MapLibreGL.FillLayer
+          id="detected-areas-fill"
+          style={{
+            fillColor: ["get", "color"],
+            fillOpacity: 0.12,
+          }}
+        />
+        <MapLibreGL.LineLayer
+          id="detected-areas-outline"
+          style={{
+            lineColor: ["get", "color"],
+            lineWidth: 2,
+            lineDasharray: [3, 2],
+            lineOpacity: 0.85,
+          }}
+        />
+      </MapLibreGL.ShapeSource>
+
+      <MapLibreGL.ShapeSource id="detected-labels" shape={detectedLabelsGeoJSON}>
+        <MapLibreGL.SymbolLayer
+          id="detected-labels-layer"
+          minZoomLevel={15}
+          style={{
+            textField: ["get", "label"],
+            textSize: [
+              "interpolate", ["linear"], ["zoom"],
+              15, 8,
+              17, 10,
+              18, 12,
+              20, 14,
+            ],
+            textColor: "#006064",
+            textHaloColor: "#ffffff",
+            textHaloWidth: 1.5,
+            textAllowOverlap: true,
+          }}
+        />
+      </MapLibreGL.ShapeSource>
+
       {/* Completed polygons — fill + outline */}
       <MapLibreGL.ShapeSource id="polygons-fill" shape={polygonsGeoJSON}>
         <MapLibreGL.FillLayer

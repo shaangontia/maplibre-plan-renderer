@@ -15,10 +15,11 @@ import { getStyleUrl } from "./plan-viewer/constants";
 import { usePlanData } from "./plan-viewer/usePlanData";
 import { useAnnotations } from "./plan-viewer/useAnnotations";
 import { useExportImport } from "./plan-viewer/useExportImport";
+import { useDetectAreas } from "./plan-viewer/useDetectAreas";
 import MapLayers from "./plan-viewer/MapLayers";
 import { ToolBar, DrawingBar } from "./plan-viewer/ToolBar";
 import PlanDropdown from "./plan-viewer/PlanDropdown";
-import { DefectInfoBar, PolygonList, MeasurementList } from "./plan-viewer/BottomPanels";
+import { DefectInfoBar, PolygonList, MeasurementList, DetectedAreasList } from "./plan-viewer/BottomPanels";
 
 // ---------------------------------------------------------------------------
 // Component
@@ -66,6 +67,15 @@ export default function PlanViewerScreen() {
   const [toolMode, setToolMode] = useState<ToolMode>("pin");
   const [mapMode, setMapMode] = useState<MapMode>("normal");
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [showDetectedAreas, setShowDetectedAreas] = useState(false);
+
+  const {
+    detectedAreas,
+    detecting,
+    detectAreas,
+    clearDetectedAreas,
+    acceptDetectedAreas,
+  } = useDetectAreas(activePlanId);
 
   // ------ Callbacks ------
   const flyToPlan = useCallback(
@@ -224,6 +234,7 @@ export default function PlanViewerScreen() {
             measurements={measurements}
             drawingCoords={drawingCoords}
             measureStart={measureStart}
+            detectedAreas={detectedAreas}
             onPinPress={handlePinPress}
           />
         </MapLibreGL.MapView>
@@ -268,6 +279,19 @@ export default function PlanViewerScreen() {
         <TouchableOpacity style={styles.centerBtn} onPress={() => flyToPlan()}>
           <Text style={styles.centerBtnText}>Center</Text>
         </TouchableOpacity>
+
+        {/* Detect Areas FAB */}
+        <TouchableOpacity
+          style={[styles.detectBtn, detecting && styles.detectBtnBusy]}
+          onPress={async () => {
+            await detectAreas();
+            setShowDetectedAreas(true);
+          }}
+          disabled={detecting}
+        >
+          <Text style={styles.detectBtnText}>{detecting ? "⏳" : "🔍"}</Text>
+          <Text style={styles.detectBtnLabel}>{detecting ? "Detecting…" : "Detect Areas"}</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Bottom panels */}
@@ -280,6 +304,25 @@ export default function PlanViewerScreen() {
       )}
       <PolygonList polygons={polygons} onDelete={deletePolygon} />
       <MeasurementList measurements={measurements} onDelete={deleteMeasurement} />
+      {showDetectedAreas && detectedAreas.length > 0 && (
+        <DetectedAreasList
+          areas={detectedAreas}
+          onAccept={() => {
+            const newPolygons = acceptDetectedAreas();
+            loadImportedAnnotations({
+              defects,
+              polygons: [...polygons, ...newPolygons],
+              measurements,
+            });
+            clearDetectedAreas();
+            setShowDetectedAreas(false);
+          }}
+          onDiscard={() => {
+            clearDetectedAreas();
+            setShowDetectedAreas(false);
+          }}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -340,4 +383,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
   },
   centerBtnText: { color: "#fff", fontSize: 11, fontWeight: "600" },
+
+  detectBtn: {
+    position: "absolute", left: 12, bottom: 68,
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: "#006064",
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
+    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 4, elevation: 4,
+  },
+  detectBtnBusy: { backgroundColor: "#455A64" },
+  detectBtnText: { fontSize: 14 },
+  detectBtnLabel: { color: "#fff", fontSize: 11, fontWeight: "700" },
 });
