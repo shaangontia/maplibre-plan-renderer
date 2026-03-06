@@ -104,10 +104,22 @@
     "imagePath": "sf_plan.png",
     "pdfPath": "sf_plan.pdf",
     "corners": {
-      "topLeft":     [-122.4206, 37.77545],
-      "topRight":    [-122.4182, 37.77545],
-      "bottomRight": [-122.4182, 37.77435],
-      "bottomLeft":  [-122.4206, 37.77435]
+      "topLeft": [
+        -122.4206,
+        37.77545
+      ],
+      "topRight": [
+        -122.4182,
+        37.77545
+      ],
+      "bottomRight": [
+        -122.4182,
+        37.77435
+      ],
+      "bottomLeft": [
+        -122.4206,
+        37.77435
+      ]
     },
     "opacity": 0.85,
     "rotation": 0,
@@ -118,5 +130,509 @@
     "calibrationMethod": "geopdf",
     "createdAt": "2026-03-06T12:00:00.000Z",
     "updatedAt": "2026-03-06T12:00:00.000Z"
+  },
+  {
+    "id": "road-overall-ash-surrey",
+    "name": "Ash Road Bridge – Overall Site Plan",
+    "imagePath": "road_overall.png",
+    "pdfPath": "road_overall.pdf",
+    "corners": {
+      "topLeft": [
+        -0.716431,
+        51.2521933
+      ],
+      "topRight": [
+        -0.7043783,
+        51.2520607
+      ],
+      "bottomRight": [
+        -0.7045283,
+        51.24672
+      ],
+      "bottomLeft": [
+        -0.7165796,
+        51.2468526
+      ]
+    },
+    "opacity": 0.88,
+    "scale": "1:1000",
+    "drawingRef": "ASHB-ACM-AH-00-DR-CE-00002",
+    "group": "ash-road-bridge",
+    "isOverview": true,
+    "linkedSheets": [
+      "road-sheet1-ash-surrey",
+      "road-sheet2-ash-surrey",
+      "road-sheet3-ash-surrey",
+      "road-sheet4-ash-surrey",
+      "road-sheet5-ash-surrey",
+      "road-sheet6-ash-surrey",
+      "road-sheet7-ash-surrey",
+      "road-sheet8-ash-surrey"
+    ],
+    "rotation": 0,
+    "floor": "Ground",
+    "building": "Ash Road Bridge",
+    "site": "A323 Guildford Road / B3411 Ash Hill Road, Ash, Surrey GU12",
+    "crs": "EPSG:4326",
+    "sourceCrs": "EPSG:27700",
+    "calibrationMethod": "computed",
+    "project": "605125228",
+    "client": "Guildford Borough Council",
+    "createdAt": "2026-03-06T14:30:00.000Z",
+    "updatedAt": "2026-03-06T14:30:00.000Z",
+    "center": [
+      -0.7104793,
+      51.2494566
+    ],
+    "bounds": {
+      "sw": [
+        -0.7165796,
+        51.24672
+      ],
+      "ne": [
+        -0.7043783,
+        51.2521933
+      ]
+    }
+  },
+  {
+    "id": "road-sheet1-ash-surrey",
+    "name": "Ash Road Bridge – Geometric Layout Sheet 1",
+    "imagePath": "road_sheet1.png",
+    "pdfPath": "road_sheet1.pdf",
+    "corners": {
+      "topLeft": [
+        -0.7138564,
+        51.2493817
+      ],
+      "topRight": [
+        -0.7108445,
+        51.2493486
+      ],
+      "bottomRight": [
+        -0.7108818,
+        51.2480134
+      ],
+      "bottomLeft": [
+        -0.7138936,
+        51.2480465
+      ]
+    },
+    "opacity": 0.9,
+    "scale": "1:250",
+    "drawingRef": "ASHB-ACM-AH-01-DR-CE-07001",
+    "group": "ash-road-bridge",
+    "isOverview": false,
+    "sheetNumber": 1,
+    "rotation": 0,
+    "floor": "Ground",
+    "building": "Ash Road Bridge",
+    "site": "A323 Guildford Road / B3411 Ash Hill Road, Ash, Surrey GU12",
+    "crs": "EPSG:4326",
+    "sourceCrs": "EPSG:27700",
+    "calibrationMethod": "computed",
+    "project": "605125228",
+    "client": "Guildford Borough Council",
+    "createdAt": "2026-03-06T14:30:00.000Z",
+    "updatedAt": "2026-03-06T14:30:00.000Z",
+    "center": [
+      -0.7123691,
+      51.2486976
+    ],
+    "bounds": {
+      "sw": [
+        -0.7138936,
+        51.2480134
+      ],
+      "ne": [
+        -0.7108445,
+        51.2493817
+      ]
+    }
+  },
+  {
+    "id": "road-sheet2-ash-surrey",
+    "name": "Ash Road Bridge – Geometric Layout Sheet 2",
+    "imagePath": "road_sheet2.png",
+    "pdfPath": "road_sheet2.pdf",
+    "corners": {
+      "topLeft": [
+        -0.712638,
+        51.2483189
+      ],
+      "topRight": [
+        -0.7096262,
+        51.2482858
+      ],
+      "bottomRight": [
+        -0.7096636,
+        51.2469505
+      ],
+      "bottomLeft": [
+        -0.7126753,
+        51.2469837
+      ]
+    },
+    "opacity": 0.9,
+    "scale": "1:250",
+    "drawingRef": "ASHB-ACM-AH-01-DR-CE-07002",
+    "group": "ash-road-bridge",
+    "isOverview": false,
+    "sheetNumber": 2,
+    "rotation": 0,
+    "floor": "Ground",
+    "building": "Ash Road Bridge",
+    "site": "A323 Guildford Road / B3411 Ash Hill Road, Ash, Surrey GU12",
+    "crs": "EPSG:4326",
+    "sourceCrs": "EPSG:27700",
+    "calibrationMethod": "computed",
+    "project": "605125228",
+    "client": "Guildford Borough Council",
+    "createdAt": "2026-03-06T14:30:00.000Z",
+    "updatedAt": "2026-03-06T14:30:00.000Z",
+    "center": [
+      -0.7111508,
+      51.2476347
+    ],
+    "bounds": {
+      "sw": [
+        -0.7126753,
+        51.2469505
+      ],
+      "ne": [
+        -0.7096262,
+        51.2483189
+      ]
+    }
+  },
+  {
+    "id": "road-sheet3-ash-surrey",
+    "name": "Ash Road Bridge – Geometric Layout Sheet 3",
+    "imagePath": "road_sheet3.png",
+    "pdfPath": "road_sheet3.pdf",
+    "corners": {
+      "topLeft": [
+        -0.7111943,
+        51.245581
+      ],
+      "topRight": [
+        -0.7081827,
+        51.2455478
+      ],
+      "bottomRight": [
+        -0.7082201,
+        51.2442126
+      ],
+      "bottomLeft": [
+        -0.7112316,
+        51.2442458
+      ]
+    },
+    "opacity": 0.9,
+    "scale": "1:250",
+    "drawingRef": "ASHB-ACM-AH-01-DR-CE-07003",
+    "group": "ash-road-bridge",
+    "isOverview": false,
+    "sheetNumber": 3,
+    "rotation": 0,
+    "floor": "Ground",
+    "building": "Ash Road Bridge",
+    "site": "A323 Guildford Road / B3411 Ash Hill Road, Ash, Surrey GU12",
+    "crs": "EPSG:4326",
+    "sourceCrs": "EPSG:27700",
+    "calibrationMethod": "computed",
+    "project": "605125228",
+    "client": "Guildford Borough Council",
+    "createdAt": "2026-03-06T14:30:00.000Z",
+    "updatedAt": "2026-03-06T14:30:00.000Z",
+    "center": [
+      -0.7097072,
+      51.2448968
+    ],
+    "bounds": {
+      "sw": [
+        -0.7112316,
+        51.2442126
+      ],
+      "ne": [
+        -0.7081827,
+        51.245581
+      ]
+    }
+  },
+  {
+    "id": "road-sheet4-ash-surrey",
+    "name": "Ash Road Bridge – Geometric Layout Sheet 4",
+    "imagePath": "road_sheet4.png",
+    "pdfPath": "road_sheet4.pdf",
+    "corners": {
+      "topLeft": [
+        -0.7107242,
+        51.2459985
+      ],
+      "topRight": [
+        -0.7077125,
+        51.2459653
+      ],
+      "bottomRight": [
+        -0.7077499,
+        51.2446301
+      ],
+      "bottomLeft": [
+        -0.7107615,
+        51.2446633
+      ]
+    },
+    "opacity": 0.9,
+    "scale": "1:250",
+    "drawingRef": "ASHB-ACM-AH-01-DR-CE-07004",
+    "group": "ash-road-bridge",
+    "isOverview": false,
+    "sheetNumber": 4,
+    "rotation": 0,
+    "floor": "Ground",
+    "building": "Ash Road Bridge",
+    "site": "A323 Guildford Road / B3411 Ash Hill Road, Ash, Surrey GU12",
+    "crs": "EPSG:4326",
+    "sourceCrs": "EPSG:27700",
+    "calibrationMethod": "computed",
+    "project": "605125228",
+    "client": "Guildford Borough Council",
+    "createdAt": "2026-03-06T14:30:00.000Z",
+    "updatedAt": "2026-03-06T14:30:00.000Z",
+    "center": [
+      -0.709237,
+      51.2453143
+    ],
+    "bounds": {
+      "sw": [
+        -0.7107615,
+        51.2446301
+      ],
+      "ne": [
+        -0.7077125,
+        51.2459985
+      ]
+    }
+  },
+  {
+    "id": "road-sheet5-ash-surrey",
+    "name": "Ash Road Bridge – Geometric Layout Sheet 5",
+    "imagePath": "road_sheet5.png",
+    "pdfPath": "road_sheet5.pdf",
+    "corners": {
+      "topLeft": [
+        -0.7115743,
+        51.2487487
+      ],
+      "topRight": [
+        -0.7085625,
+        51.2487155
+      ],
+      "bottomRight": [
+        -0.7085999,
+        51.2473803
+      ],
+      "bottomLeft": [
+        -0.7116116,
+        51.2474135
+      ]
+    },
+    "opacity": 0.9,
+    "scale": "1:250",
+    "drawingRef": "ASHB-ACM-AH-01-DR-CE-07005",
+    "group": "ash-road-bridge",
+    "isOverview": false,
+    "sheetNumber": 5,
+    "rotation": 0,
+    "floor": "Ground",
+    "building": "Ash Road Bridge",
+    "site": "A323 Guildford Road / B3411 Ash Hill Road, Ash, Surrey GU12",
+    "crs": "EPSG:4326",
+    "sourceCrs": "EPSG:27700",
+    "calibrationMethod": "computed",
+    "project": "605125228",
+    "client": "Guildford Borough Council",
+    "createdAt": "2026-03-06T14:30:00.000Z",
+    "updatedAt": "2026-03-06T14:30:00.000Z",
+    "center": [
+      -0.7100871,
+      51.2480645
+    ],
+    "bounds": {
+      "sw": [
+        -0.7116116,
+        51.2473803
+      ],
+      "ne": [
+        -0.7085625,
+        51.2487487
+      ]
+    }
+  },
+  {
+    "id": "road-sheet6-ash-surrey",
+    "name": "Ash Road Bridge – Geometric Layout Sheet 6",
+    "imagePath": "road_sheet6.png",
+    "pdfPath": "road_sheet6.pdf",
+    "corners": {
+      "topLeft": [
+        -0.7123008,
+        51.2514652
+      ],
+      "topRight": [
+        -0.7092888,
+        51.2514321
+      ],
+      "bottomRight": [
+        -0.7093262,
+        51.2500968
+      ],
+      "bottomLeft": [
+        -0.7123381,
+        51.25013
+      ]
+    },
+    "opacity": 0.9,
+    "scale": "1:250",
+    "drawingRef": "ASHB-ACM-AH-01-DR-CE-07006",
+    "group": "ash-road-bridge",
+    "isOverview": false,
+    "sheetNumber": 6,
+    "rotation": 0,
+    "floor": "Ground",
+    "building": "Ash Road Bridge",
+    "site": "A323 Guildford Road / B3411 Ash Hill Road, Ash, Surrey GU12",
+    "crs": "EPSG:4326",
+    "sourceCrs": "EPSG:27700",
+    "calibrationMethod": "computed",
+    "project": "605125228",
+    "client": "Guildford Borough Council",
+    "createdAt": "2026-03-06T14:30:00.000Z",
+    "updatedAt": "2026-03-06T14:30:00.000Z",
+    "center": [
+      -0.7108135,
+      51.250781
+    ],
+    "bounds": {
+      "sw": [
+        -0.7123381,
+        51.2500968
+      ],
+      "ne": [
+        -0.7092888,
+        51.2514652
+      ]
+    }
+  },
+  {
+    "id": "road-sheet7-ash-surrey",
+    "name": "Ash Road Bridge – Geometric Layout Sheet 7",
+    "imagePath": "road_sheet7.png",
+    "pdfPath": "road_sheet7.pdf",
+    "corners": {
+      "topLeft": [
+        -0.7133668,
+        51.252342
+      ],
+      "topRight": [
+        -0.7103547,
+        51.2523089
+      ],
+      "bottomRight": [
+        -0.7103921,
+        51.2509737
+      ],
+      "bottomLeft": [
+        -0.7134041,
+        51.2510068
+      ]
+    },
+    "opacity": 0.9,
+    "scale": "1:250",
+    "drawingRef": "ASHB-ACM-AH-01-DR-CE-07007",
+    "group": "ash-road-bridge",
+    "isOverview": false,
+    "sheetNumber": 7,
+    "rotation": 0,
+    "floor": "Ground",
+    "building": "Ash Road Bridge",
+    "site": "A323 Guildford Road / B3411 Ash Hill Road, Ash, Surrey GU12",
+    "crs": "EPSG:4326",
+    "sourceCrs": "EPSG:27700",
+    "calibrationMethod": "computed",
+    "project": "605125228",
+    "client": "Guildford Borough Council",
+    "createdAt": "2026-03-06T14:30:00.000Z",
+    "updatedAt": "2026-03-06T14:30:00.000Z",
+    "center": [
+      -0.7118794,
+      51.2516579
+    ],
+    "bounds": {
+      "sw": [
+        -0.7134041,
+        51.2509737
+      ],
+      "ne": [
+        -0.7103547,
+        51.252342
+      ]
+    }
+  },
+  {
+    "id": "road-sheet8-ash-surrey",
+    "name": "Ash Road Bridge – Geometric Layout Sheet 8",
+    "imagePath": "road_sheet8.png",
+    "pdfPath": "road_sheet8.pdf",
+    "corners": {
+      "topLeft": [
+        -0.714965,
+        51.2519657
+      ],
+      "topRight": [
+        -0.7119529,
+        51.2519326
+      ],
+      "bottomRight": [
+        -0.7119902,
+        51.2505974
+      ],
+      "bottomLeft": [
+        -0.7150022,
+        51.2506305
+      ]
+    },
+    "opacity": 0.9,
+    "scale": "1:250",
+    "drawingRef": "ASHB-ACM-AH-01-DR-CE-07008",
+    "group": "ash-road-bridge",
+    "isOverview": false,
+    "sheetNumber": 8,
+    "rotation": 0,
+    "floor": "Ground",
+    "building": "Ash Road Bridge",
+    "site": "A323 Guildford Road / B3411 Ash Hill Road, Ash, Surrey GU12",
+    "crs": "EPSG:4326",
+    "sourceCrs": "EPSG:27700",
+    "calibrationMethod": "computed",
+    "project": "605125228",
+    "client": "Guildford Borough Council",
+    "createdAt": "2026-03-06T14:30:00.000Z",
+    "updatedAt": "2026-03-06T14:30:00.000Z",
+    "center": [
+      -0.7134776,
+      51.2512816
+    ],
+    "bounds": {
+      "sw": [
+        -0.7150022,
+        51.2505974
+      ],
+      "ne": [
+        -0.7119529,
+        51.2519657
+      ]
+    }
   }
 ]

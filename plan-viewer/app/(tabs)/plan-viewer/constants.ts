@@ -32,5 +32,5 @@ export const POLYGON_COLORS = [
 
 export const DEFAULT_CENTER: [number, number] = [0, 0];
 
-export const getStyleUrl = (mode: MapMode) =>
-  `${TILE_SERVER}/style.json?mode=${mode}`;
+export const getStyleUrl = (mode: MapMode, planId?: string) =>
+  `${TILE_SERVER}/style.json?mode=${mode}${planId ? `&planId=${planId}` : ""}`;

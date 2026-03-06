@@ -69,6 +69,7 @@ export default function PlanViewerScreen() {
   const [mapMode, setMapMode] = useState<MapMode>("normal");
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [showDetectedAreas, setShowDetectedAreas] = useState(false);
+  const [areaNavMode, setAreaNavMode] = useState(false);
 
   const {
     detectedAreas,
@@ -107,23 +108,6 @@ export default function PlanViewerScreen() {
     flyToPlan();
   }, [flyToPlan]);
 
-  const handleMapPress = useCallback(
-    (feature: Feature) => {
-      if (feature.geometry.type !== "Point") return;
-      const [lon, lat] = feature.geometry.coordinates;
-      const coord: Coord = [lon, lat];
-
-      if (toolMode === "pin") {
-        addDefect(lon, lat);
-      } else if (toolMode === "polygon") {
-        addDrawingPoint(coord);
-      } else if (toolMode === "measure") {
-        addMeasurement(coord);
-      }
-    },
-    [toolMode, addDefect, addDrawingPoint, addMeasurement]
-  );
-
   const handlePinPress = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (e: any) => {
@@ -151,6 +135,22 @@ export default function PlanViewerScreen() {
     []
   );
 
+  // Sheet drill-down: linked detail plans for the current overview
+  const linkedSheetPlans = useMemo(() => {
+    if (!activePlan?.isOverview || !activePlan.linkedSheets) return [];
+    return activePlan.linkedSheets
+      .map((id) => planData?.plans.find((p) => p.id === id))
+      .filter((p): p is PlanInfo => p != null);
+  }, [activePlan, planData]);
+
+  // Overview plan for the current sheet (for Back button)
+  const overviewPlan = useMemo(() => {
+    if (!activePlan?.group || activePlan.isOverview) return null;
+    return planData?.plans.find(
+      (p) => p.group === activePlan.group && p.isOverview
+    ) ?? null;
+  }, [activePlan, planData]);
+
   // Follow-me: whenever location updates and following is on, re-center camera
   React.useEffect(() => {
     if (following && userLocation) {
@@ -168,6 +168,53 @@ export default function PlanViewerScreen() {
       setTimeout(() => flyToPlan(plan), 200);
     },
     [flyToPlan, setActivePlanId]
+  );
+
+  const handleSheetPress = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (e: any) => {
+      const feature = e?.features?.[0];
+      if (!feature?.properties?.planId) return;
+      const target = planData?.plans.find(
+        (p) => p.id === feature.properties.planId
+      );
+      if (target) selectPlan(target);
+    },
+    [planData, selectPlan]
+  );
+
+  const handleMapPress = useCallback(
+    async (feature: Feature) => {
+      if (feature.geometry.type !== "Point") return;
+      const [lon, lat] = feature.geometry.coordinates;
+      const coord: Coord = [lon, lat];
+
+      // If viewing an overview with area nav enabled, check if tap hit a sheet boundary polygon
+      if (areaNavMode && linkedSheetPlans.length > 0 && mapRef.current) {
+        try {
+          const screenPoint = await mapRef.current.getPointInView([lon, lat]);
+          const hits = await mapRef.current.queryRenderedFeaturesAtPoint(
+            screenPoint,
+            null,
+            ["sheet-boundaries-fill"]
+          );
+          if (hits?.features?.length > 0) {
+            const hitPlanId = hits.features[0]?.properties?.planId;
+            const target = planData?.plans.find((p) => p.id === hitPlanId);
+            if (target) { selectPlan(target); return; }
+          }
+        } catch (_) { /* ignore query errors */ }
+      }
+
+      if (toolMode === "pin") {
+        addDefect(lon, lat);
+      } else if (toolMode === "polygon") {
+        addDrawingPoint(coord);
+      } else if (toolMode === "measure") {
+        addMeasurement(coord);
+      }
+    },
+    [toolMode, areaNavMode, linkedSheetPlans, planData, selectPlan, addDefect, addDrawingPoint, addMeasurement]
   );
 
   // Status text
@@ -253,7 +300,7 @@ export default function PlanViewerScreen() {
         <MapLibreGL.MapView
           ref={mapRef}
           style={styles.map}
-          mapStyle={getStyleUrl(mapMode)}
+          mapStyle={getStyleUrl(mapMode, activePlanId ?? undefined)}
           logoEnabled={false}
           attributionEnabled={false}
           onDidFinishLoadingMap={onMapReady}
@@ -274,8 +321,11 @@ export default function PlanViewerScreen() {
             measureStart={measureStart}
             detectedAreas={detectedAreas}
             userLocation={userLocation}
+            linkedSheetPlans={linkedSheetPlans}
+            areaNavMode={areaNavMode}
             onPinPress={handlePinPress}
             onClusterPress={handleClusterPress}
+            onSheetPress={handleSheetPress}
           />
         </MapLibreGL.MapView>
 
@@ -366,6 +416,29 @@ export default function PlanViewerScreen() {
               <Text style={styles.dpadText}>▼</Text>
             </TouchableOpacity>
           </View>
+        )}
+
+        {/* Area Navigation toggle — only shown on overview plans */}
+        {linkedSheetPlans.length > 0 && (
+          <TouchableOpacity
+            style={[styles.areaNavBtn, areaNavMode && styles.areaNavBtnActive]}
+            onPress={() => setAreaNavMode((v) => !v)}
+          >
+            <Text style={styles.areaNavIcon}>🗺️</Text>
+            <Text style={[styles.areaNavLabel, areaNavMode && styles.areaNavLabelActive]}>
+              {areaNavMode ? "Area Nav ON" : "Area Nav"}
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Back to Overview — shown when viewing a detail sheet in area nav mode */}
+        {areaNavMode && overviewPlan && (
+          <TouchableOpacity
+            style={styles.backToOverviewBtn}
+            onPress={() => selectPlan(overviewPlan)}
+          >
+            <Text style={styles.backToOverviewText}>⬅ Overview</Text>
+          </TouchableOpacity>
         )}
 
         {/* Detect Areas FAB */}
@@ -471,6 +544,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
   },
   centerBtnText: { color: "#fff", fontSize: 11, fontWeight: "600" },
+
+  areaNavBtn: {
+    position: "absolute", left: 12, bottom: 248,
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
+    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 4, elevation: 4,
+  },
+  areaNavBtnActive: { backgroundColor: "#1565C0" },
+  areaNavIcon: { fontSize: 14 },
+  areaNavLabel: { color: "#fff", fontSize: 11, fontWeight: "600" },
+  areaNavLabelActive: { color: "#fff" },
+
+  backToOverviewBtn: {
+    position: "absolute", left: 12, bottom: 200,
+    flexDirection: "row", alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.75)",
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
+  },
+  backToOverviewText: { color: "#fff", fontSize: 12, fontWeight: "700" },
 
   simBtn: {
     position: "absolute", left: 12, bottom: 156,

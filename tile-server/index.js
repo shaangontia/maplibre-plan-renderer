@@ -1155,7 +1155,10 @@ app.get("/style.json", (req, res) => {
   const host = req.headers.host || `localhost:${PORT}`;
   const baseUrl = `http://${host}`;
   const mode = req.query.mode || "normal";
-  const plans = readDb();
+  const planId = req.query.planId || null;
+  const allPlans = readDb();
+  // Only render the requested plan image — prevents all plans stacking on top of each other
+  const plans = planId ? allPlans.filter((p) => p.id === planId) : allPlans;
 
   const sources = {};
   const layers = [];
@@ -1250,6 +1253,11 @@ app.get("/plan-info", (_req, res) => {
       building: p.building,
       site: p.site,
       calibrationMethod: p.calibrationMethod,
+      // Sheet drill-down fields
+      group: p.group,
+      isOverview: p.isOverview,
+      linkedSheets: p.linkedSheets,
+      sheetNumber: p.sheetNumber,
     };
   });
 

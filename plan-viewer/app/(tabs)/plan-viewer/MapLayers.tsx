@@ -1,7 +1,7 @@
 import MapLibreGL from "@maplibre/maplibre-react-native";
 import type { FeatureCollection, Point, Polygon, LineString } from "geojson";
 import React, { useMemo } from "react";
-import type { Defect, AreaPolygon, Measurement, Coord } from "./types";
+import type { Defect, AreaPolygon, Measurement, Coord, PlanInfo } from "./types";
 import type { DetectedArea } from "./useDetectAreas";
 import type { UserLocation } from "./useUserLocation";
 import { SEVERITY_COLORS } from "./constants";
@@ -21,11 +21,22 @@ interface MapLayersProps {
   measureStart: Coord | null;
   detectedAreas: DetectedArea[];
   userLocation: UserLocation | null;
+  // Sheet drill-down: list of detail plans linked to the active overview
+  linkedSheetPlans?: PlanInfo[];
+  areaNavMode?: boolean;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onPinPress: (e: any) => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onClusterPress?: (e: any) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onSheetPress?: (e: any) => void;
 }
+
+// Colour palette for sheet boundary boxes
+const SHEET_COLORS = [
+  "#1565C0","#AD1457","#00695C","#E65100",
+  "#4527A0","#558B2F","#6D4C41","#00838F",
+];
 
 export default function MapLayers({
   defects,
@@ -35,9 +46,39 @@ export default function MapLayers({
   measureStart,
   detectedAreas,
   userLocation,
+  linkedSheetPlans,
+  areaNavMode,
   onPinPress,
   onClusterPress,
+  onSheetPress,
 }: MapLayersProps) {
+  // ------ GeoJSON: sheet boundary polygons (overview drill-down) ------
+  const sheetBoundariesGeoJSON = useMemo<FeatureCollection<Polygon>>(() => ({
+    type: "FeatureCollection",
+    features: (linkedSheetPlans ?? []).map((plan, idx) => {
+      const c = plan.corners;
+      return {
+        type: "Feature" as const,
+        id: plan.id,
+        properties: {
+          planId: plan.id,
+          label: `Sheet ${plan.sheetNumber ?? idx + 1}`,
+          color: SHEET_COLORS[idx % SHEET_COLORS.length],
+        },
+        geometry: {
+          type: "Polygon" as const,
+          coordinates: [[
+            c.topLeft,
+            c.topRight,
+            c.bottomRight,
+            c.bottomLeft,
+            c.topLeft,
+          ]],
+        },
+      };
+    }),
+  }), [linkedSheetPlans]);
+
   // ------ GeoJSON: user location dot ------
   const userLocationGeoJSON = useMemo<FeatureCollection<Point>>(
     () => ({
@@ -406,6 +447,48 @@ export default function MapLayers({
           }}
         />
       </MapLibreGL.ShapeSource>
+
+      {/* Sheet boundaries — clickable overview drill-down boxes (only in area nav mode) */}
+      {areaNavMode && linkedSheetPlans && linkedSheetPlans.length > 0 && (
+        <MapLibreGL.ShapeSource
+          id="sheet-boundaries"
+          shape={sheetBoundariesGeoJSON}
+          onPress={onSheetPress}
+        >
+          {/* Translucent fill */}
+          <MapLibreGL.FillLayer
+            id="sheet-boundaries-fill"
+            style={{
+              fillColor: ["get", "color"],
+              fillOpacity: 0.15,
+            }}
+          />
+          {/* Solid outline */}
+          <MapLibreGL.LineLayer
+            id="sheet-boundaries-outline"
+            style={{
+              lineColor: ["get", "color"],
+              lineWidth: 2.5,
+              lineDasharray: [4, 3],
+            }}
+          />
+          {/* Sheet number label at centre */}
+          <MapLibreGL.SymbolLayer
+            id="sheet-boundaries-label"
+            style={{
+              textField: ["get", "label"],
+              textSize: 14,
+              textColor: ["get", "color"],
+              textHaloColor: "#ffffff",
+              textHaloWidth: 2,
+              textAllowOverlap: true,
+              textIgnorePlacement: true,
+              textAnchor: "center",
+              textFont: ["Open Sans Bold"],
+            }}
+          />
+        </MapLibreGL.ShapeSource>
+      )}
 
       {/* User location — blue dot with accuracy halo */}
       <MapLibreGL.ShapeSource id="user-location" shape={userLocationGeoJSON}>

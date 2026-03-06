@@ -18,6 +18,11 @@ export interface PlanInfo {
   building?: string;
   site?: string;
   calibrationMethod?: string;
+  // Sheet drill-down
+  group?: string;
+  isOverview?: boolean;
+  linkedSheets?: string[];   // plan IDs of detail sheets
+  sheetNumber?: number;
 }
 
 export interface PlanInfoResponse {
