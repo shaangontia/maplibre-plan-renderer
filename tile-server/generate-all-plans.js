@@ -282,6 +282,134 @@ function generateParis() {
   console.log("Generated: paris_floor_plan.png");
 }
 
+// ── San Francisco: Market Street Tech Hub ────────────────────────────────
+function generateSF() {
+  const W = 1800, H = 1200;
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, W, H);
+
+  const OX = 80, OY = 80, FW = 1640, FH = 1000;
+
+  // Outer walls
+  drawWall(ctx, OX, OY, OX + FW, OY);
+  drawWall(ctx, OX, OY + FH, OX + FW, OY + FH);
+  drawWall(ctx, OX, OY, OX, OY + FH);
+  drawWall(ctx, OX + FW, OY, OX + FW, OY + FH);
+
+  // Main horizontal corridor at 40%
+  drawWall(ctx, OX, OY + 400, OX + FW, OY + 400);
+
+  // Top row vertical dividers → 4 offices
+  drawWall(ctx, OX + 410, OY, OX + 410, OY + 400);
+  drawWall(ctx, OX + 820, OY, OX + 820, OY + 400);
+  drawWall(ctx, OX + 1230, OY, OX + 1230, OY + 400);
+
+  // Bottom: open floor + right-side rooms
+  drawWall(ctx, OX + 1100, OY + 400, OX + 1100, OY + FH);
+  drawWall(ctx, OX + 1100, OY + 650, OX + FW, OY + 650);
+  drawWall(ctx, OX + 1100, OY + 820, OX + FW, OY + 820);
+
+  // Bottom-left: kitchen / lounge divider
+  drawWall(ctx, OX + 380, OY + 700, OX + 380, OY + FH);
+
+  // Doors
+  drawDoor(ctx, OX + 200, OY + 400, 55, -90);
+  drawDoor(ctx, OX + 600, OY + 400, 55, -90);
+  drawDoor(ctx, OX + 1020, OY + 400, 55, -90);
+  drawDoor(ctx, OX + 1420, OY + 400, 55, -90);
+  drawDoor(ctx, OX + 1100, OY + 520, 55, 0);
+  drawDoor(ctx, OX + 1100, OY + 730, 55, 0);
+  drawDoor(ctx, OX + 1100, OY + 900, 55, 0);
+  drawDoor(ctx, OX + 200, OY + 700, 55, 90);
+
+  // Windows — top facade
+  drawWindow(ctx, OX + 80, OY, OX + 360, OY);
+  drawWindow(ctx, OX + 480, OY, OX + 760, OY);
+  drawWindow(ctx, OX + 900, OY, OX + 1170, OY);
+  drawWindow(ctx, OX + 1300, OY, OX + 1580, OY);
+  // Bottom facade
+  drawWindow(ctx, OX + 80, OY + FH, OX + 320, OY + FH);
+  drawWindow(ctx, OX + 450, OY + FH, OX + 1050, OY + FH);
+  drawWindow(ctx, OX + 1150, OY + FH, OX + 1580, OY + FH);
+  // Left / right facades
+  drawWindow(ctx, OX, OY + 100, OX, OY + 350);
+  drawWindow(ctx, OX + FW, OY + 100, OX + FW, OY + 600);
+
+  // Room labels
+  label(ctx, "Private Office A", OX + 205, OY + 190, 19);
+  label(ctx, "4.1m × 4.0m", OX + 205, OY + 220, 12);
+  label(ctx, "Private Office B", OX + 615, OY + 190, 19);
+  label(ctx, "4.1m × 4.0m", OX + 615, OY + 220, 12);
+  label(ctx, "Conference Room", OX + 1025, OY + 190, 19);
+  label(ctx, "4.1m × 4.0m", OX + 1025, OY + 220, 12);
+  label(ctx, "Private Office C", OX + 1435, OY + 190, 19);
+  label(ctx, "4.1m × 4.0m", OX + 1435, OY + 220, 12);
+
+  label(ctx, "Open Workspace", OX + 480, OY + 680, 24);
+  label(ctx, "11.0m × 6.0m", OX + 480, OY + 712, 14);
+
+  label(ctx, "Kitchen / Lounge", OX + 190, OY + 840, 19);
+  label(ctx, "3.8m × 3.0m", OX + 190, OY + 868, 12);
+
+  label(ctx, "Phone Booth 1", OX + 1320, OY + 520, 16);
+  label(ctx, "Focus Room", OX + 1320, OY + 720, 16);
+  label(ctx, "Server Room", OX + 1320, OY + 895, 16);
+
+  ctx.fillStyle = "#666";
+  ctx.font = "italic 14px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText("C O R R I D O R", OX + FW / 2, OY + 385);
+
+  // Furniture — open workspace desks
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 5; c++) {
+      drawFurniture(ctx, OX + 110 + c * 200, OY + 480 + r * 130, 140, 50, "#e8e8e8");
+    }
+  }
+  // Conference table
+  drawFurniture(ctx, OX + 870, OY + 140, 280, 100, "#d8e8d0");
+  // Private office desks
+  drawFurniture(ctx, OX + 130, OY + 130, 160, 60, "#e8e8e8");
+  drawFurniture(ctx, OX + 540, OY + 130, 160, 60, "#e8e8e8");
+  drawFurniture(ctx, OX + 1350, OY + 130, 160, 60, "#e8e8e8");
+  // Kitchen counter
+  drawFurniture(ctx, OX + 100, OY + 730, 230, 40, "#c8d8e8");
+  // Phone booth chairs
+  drawFurniture(ctx, OX + 1150, OY + 490, 80, 60, "#e0d8f0");
+  drawFurniture(ctx, OX + 1150, OY + 700, 80, 60, "#e0d8f0");
+
+  // Dimensions
+  dimension(ctx, OX, OY - 25, OX + FW, OY - 25, "16.4m", 15);
+  dimension(ctx, OX - 25, OY, OX - 25, OY + FH, "10.0m", 15);
+
+  // North arrow
+  ctx.save();
+  ctx.translate(OX + FW - 50, OY + 50);
+  ctx.fillStyle = "#333";
+  ctx.beginPath();
+  ctx.moveTo(0, -25); ctx.lineTo(-10, 10); ctx.lineTo(0, 3); ctx.lineTo(10, 10);
+  ctx.closePath(); ctx.fill();
+  ctx.font = "bold 14px Arial"; ctx.textAlign = "center";
+  ctx.fillText("N", 0, -30);
+  ctx.restore();
+
+  // Title block
+  ctx.fillStyle = "#1a1a1a";
+  ctx.font = "bold 20px Arial"; ctx.textAlign = "left";
+  ctx.fillText("FLOOR PLAN - MARKET STREET TECH HUB", OX, OY + FH + 50);
+  ctx.font = "14px Arial"; ctx.fillStyle = "#666";
+  ctx.fillText("Scale 1:100  |  101 Market St, San Francisco, CA 94105", OX, OY + FH + 75);
+
+  const buf = canvas.toBuffer("image/png");
+  const outPath = path.join(outDir, "images", "sf_plan.png");
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
+  fs.writeFileSync(outPath, buf);
+  console.log("Generated: plans/images/sf_plan.png");
+}
+
 generateBerlin();
 generateParis();
+generateSF();
 console.log("Done.");

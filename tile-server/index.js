@@ -821,9 +821,9 @@ app.get("/api/plans/:id/detect-areas", async (req, res) => {
   try {
     const sharp = require("sharp");
 
-    // ── Step 1: Downsample to a manageable working resolution ──────────────
-    const WORK_W = 650;
-    const WORK_H = 484;
+    // ── Step 1: Downsample to working resolution ───────────────────────────
+    const WORK_W = 1000;
+    const WORK_H = 744;
     const { data, info } = await sharp(imgPath)
       .resize(WORK_W, WORK_H, { fit: "fill" })
       .greyscale()
@@ -833,99 +833,203 @@ app.get("/api/plans/:id/detect-areas", async (req, res) => {
     const { width, height } = info;
     const idx = (x, y) => y * width + x;
 
-    // ── Step 2: Build wall map — pixels darker than 160 are walls ──────────
-    const isWall = new Uint8Array(width * height);
-    for (let i = 0; i < data.length; i++) {
-      isWall[i] = data[i] < 160 ? 1 : 0;
-    }
-
-    // ── Step 3: Dilate walls by DILATE pixels to close doorway gaps ────────
-    // This is the key fix: small gaps between rooms (doorways) get sealed so
-    // flood-fill from the outside cannot enter individual rooms.
-    const DILATE = 4;
-    const wallDilated = new Uint8Array(width * height);
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        let wall = false;
-        outer: for (let dy = -DILATE; dy <= DILATE && !wall; dy++) {
-          for (let dx = -DILATE; dx <= DILATE && !wall; dx++) {
-            const nx = x + dx, ny = y + dy;
-            if (nx >= 0 && ny >= 0 && nx < width && ny < height && isWall[idx(nx, ny)]) {
-              wall = true;
+    // ── Helper: flood-fill room detection at a given wall dilation ─────────
+    // Dilates walls to seal doorway gaps, flood-fills from border to find
+    // "outside", then labels remaining enclosed pixels as rooms.
+    function floodDetect(threshold, dilate) {
+      const wd = new Uint8Array(width * height);
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          let wall = false;
+          outer: for (let dy = -dilate; dy <= dilate && !wall; dy++) {
+            for (let dx = -dilate; dx <= dilate && !wall; dx++) {
+              const nx = x + dx, ny = y + dy;
+              if (nx >= 0 && ny >= 0 && nx < width && ny < height && data[idx(nx, ny)] < threshold) {
+                wall = true;
+              }
             }
           }
+          wd[idx(x, y)] = wall ? 1 : 0;
         }
-        wallDilated[idx(x, y)] = wall ? 1 : 0;
       }
-    }
-
-    // ── Step 4: Flood-fill from all border pixels to mark "outside" ────────
-    const outside = new Uint8Array(width * height);
-    const borderStack = [];
-    for (let x = 0; x < width; x++) {
-      borderStack.push([x, 0], [x, height - 1]);
-    }
-    for (let y = 1; y < height - 1; y++) {
-      borderStack.push([0, y], [width - 1, y]);
-    }
-    while (borderStack.length > 0) {
-      const [x, y] = borderStack.pop();
-      if (x < 0 || y < 0 || x >= width || y >= height) continue;
-      if (wallDilated[idx(x, y)] || outside[idx(x, y)]) continue;
-      outside[idx(x, y)] = 1;
-      borderStack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
-    }
-
-    // ── Step 5: Label enclosed regions (not wall, not outside) as rooms ────
-    const labels = new Int32Array(width * height).fill(-1);
-    let nextLabel = 0;
-    const boxes = new Map();
-
-    for (let y = 1; y < height - 1; y++) {
-      for (let x = 1; x < width - 1; x++) {
-        const i = idx(x, y);
-        if (wallDilated[i] || outside[i] || labels[i] !== -1) continue;
-
-        const label = nextLabel++;
-        const stack = [[x, y]];
-        while (stack.length > 0) {
-          const [cx, cy] = stack.pop();
-          if (cx < 0 || cy < 0 || cx >= width || cy >= height) continue;
-          const ci = idx(cx, cy);
-          if (wallDilated[ci] || outside[ci] || labels[ci] !== -1) continue;
-          labels[ci] = label;
-          if (!boxes.has(label)) {
-            boxes.set(label, { minX: cx, minY: cy, maxX: cx, maxY: cy, count: 1 });
-          } else {
-            const b = boxes.get(label);
-            b.count++;
-            if (cx < b.minX) b.minX = cx;
-            if (cy < b.minY) b.minY = cy;
-            if (cx > b.maxX) b.maxX = cx;
-            if (cy > b.maxY) b.maxY = cy;
+      const outside = new Uint8Array(width * height);
+      const bs = [];
+      for (let x = 0; x < width; x++) { bs.push([x, 0], [x, height - 1]); }
+      for (let y = 1; y < height - 1; y++) { bs.push([0, y], [width - 1, y]); }
+      while (bs.length) {
+        const [x, y] = bs.pop();
+        if (x < 0 || y < 0 || x >= width || y >= height || wd[idx(x, y)] || outside[idx(x, y)]) continue;
+        outside[idx(x, y)] = 1;
+        bs.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+      }
+      const labels = new Int32Array(width * height).fill(-1);
+      let nl = 0;
+      const boxes = new Map();
+      for (let y = 1; y < height - 1; y++) {
+        for (let x = 1; x < width - 1; x++) {
+          const i = idx(x, y);
+          if (wd[i] || outside[i] || labels[i] !== -1) continue;
+          const label = nl++;
+          const s = [[x, y]];
+          while (s.length) {
+            const [cx, cy] = s.pop();
+            if (cx < 0 || cy < 0 || cx >= width || cy >= height) continue;
+            const ci = idx(cx, cy);
+            if (wd[ci] || outside[ci] || labels[ci] !== -1) continue;
+            labels[ci] = label;
+            if (!boxes.has(label)) {
+              boxes.set(label, { minX: cx, minY: cy, maxX: cx, maxY: cy, count: 1 });
+            } else {
+              const b = boxes.get(label);
+              b.count++;
+              if (cx < b.minX) b.minX = cx;
+              if (cy < b.minY) b.minY = cy;
+              if (cx > b.maxX) b.maxX = cx;
+              if (cy > b.maxY) b.maxY = cy;
+            }
+            s.push([cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]);
           }
-          stack.push([cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]);
         }
       }
+      const total = width * height;
+      return [...boxes.values()]
+        .filter(b => {
+          const bw = b.maxX - b.minX, bh = b.maxY - b.minY;
+          return b.count > total * 0.003 && b.count < total * 0.20 &&
+                 bw > width * 0.03 && bh > height * 0.03;
+        })
+        .map(b => ({ x1: b.minX / width, y1: b.minY / height, x2: b.maxX / width, y2: b.maxY / height }));
     }
 
-    // ── Step 6: Filter by size — must be a plausible room ─────────────────
-    const totalPixels = width * height;
-    const minPixels = totalPixels * 0.003;  // at least 0.3% of image
-    const maxPixels = totalPixels * 0.70;   // less than 70% (not background)
-    const minDimPx  = Math.min(width, height) * 0.02; // at least 2% of short side
+    // ── Helper: grid-projection room detection ─────────────────────────────
+    // Finds horizontal and vertical wall bands via projection profiles,
+    // builds a grid, and evaluates each cell for room-like brightness.
+    function gridDetect() {
+      const WALL_T = 130, MIN_DARK = 0.14, MERGE_GAP = 8;
+      const hProj = new Float32Array(height);
+      const vProj = new Float32Array(width);
+      for (let y = 0; y < height; y++) {
+        let d = 0;
+        for (let x = 0; x < width; x++) if (data[idx(x, y)] < WALL_T) d++;
+        hProj[y] = d / width;
+      }
+      for (let x = 0; x < width; x++) {
+        let d = 0;
+        for (let y = 0; y < height; y++) if (data[idx(x, y)] < WALL_T) d++;
+        vProj[x] = d / height;
+      }
+      function findBands(proj, size) {
+        const raw = [];
+        let inB = false, st = 0;
+        for (let i = 0; i < size; i++) {
+          if (proj[i] >= MIN_DARK && !inB) { inB = true; st = i; }
+          else if (proj[i] < MIN_DARK && inB) { raw.push({ s: st, e: i - 1 }); inB = false; }
+        }
+        if (inB) raw.push({ s: st, e: size - 1 });
+        const merged = [];
+        for (const b of raw) {
+          if (merged.length > 0 && b.s - merged[merged.length - 1].e <= MERGE_GAP) {
+            merged[merged.length - 1].e = b.e;
+          } else {
+            merged.push({ ...b });
+          }
+        }
+        return merged;
+      }
+      const hB = findBands(hProj, height);
+      const vB = findBands(vProj, width);
 
-    const rooms = [];
-    for (const [, box] of boxes) {
-      const bw = box.maxX - box.minX;
-      const bh = box.maxY - box.minY;
-      if (box.count < minPixels || box.count > maxPixels) continue;
-      if (bw < minDimPx || bh < minDimPx) continue;
-      rooms.push(box);
+      // Grid lines: use inner wall band edges, bounded by the outer border bands
+      const topBound  = hB[0]   ? hB[0].e + 1   : 0;
+      const botBound  = hB[hB.length - 1] ? hB[hB.length - 1].s : height;
+      const leftBound = vB[0]   ? vB[0].e + 1   : 0;
+      const rightBound= vB[vB.length - 1] ? vB[vB.length - 1].s : width;
+
+      const innerH = hB.filter(b => b.s > height * 0.03 && b.e < height * 0.97);
+      const innerV = vB.filter(b => b.s > width  * 0.03 && b.e < width  * 0.97);
+
+      const ys = [topBound, ...innerH.map(b => b.e + 1), botBound]
+        .filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a - b);
+      const xs = [leftBound, ...innerV.map(b => b.e + 1), rightBound]
+        .filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a - b);
+
+      const MIN_W = width * 0.08, MIN_H = height * 0.08;
+      const rooms = [];
+      for (let ri = 0; ri < ys.length - 1; ri++) {
+        for (let ci = 0; ci < xs.length - 1; ci++) {
+          const y1 = ys[ri], y2 = ys[ri + 1], x1 = xs[ci], x2 = xs[ci + 1];
+          if (x2 - x1 < MIN_W || y2 - y1 < MIN_H) continue;
+          let light = 0, total = 0;
+          const step = Math.max(1, Math.floor(Math.min(x2 - x1, y2 - y1) / 12));
+          for (let y = y1 + 2; y < y2 - 2; y += step) {
+            for (let x = x1 + 2; x < x2 - 2; x += step) {
+              if (data[idx(x, y)] >= 140) light++;
+              total++;
+            }
+          }
+          if (total > 0 && light / total > 0.60) {
+            rooms.push({ x1: x1 / width, y1: y1 / height, x2: x2 / width, y2: y2 / height });
+          }
+        }
+      }
+      return rooms;
     }
+
+    // ── Step 2: Run both detectors and merge ───────────────────────────────
+    const candidates = [
+      ...floodDetect(160, 4),
+      ...floodDetect(160, 6),
+      ...gridDetect(),
+    ];
+
+    // ── Step 3: Non-maximum suppression (IoU > 0.25 → keep larger) ────────
+    function iou(a, b) {
+      const ix1 = Math.max(a.x1, b.x1), iy1 = Math.max(a.y1, b.y1);
+      const ix2 = Math.min(a.x2, b.x2), iy2 = Math.min(a.y2, b.y2);
+      if (ix2 <= ix1 || iy2 <= iy1) return 0;
+      const inter = (ix2 - ix1) * (iy2 - iy1);
+      const ua = (a.x2 - a.x1) * (a.y2 - a.y1), ub = (b.x2 - b.x1) * (b.y2 - b.y1);
+      return inter / (ua + ub - inter);
+    }
+    candidates.sort((a, b) => ((b.x2 - b.x1) * (b.y2 - b.y1)) - ((a.x2 - a.x1) * (a.y2 - a.y1)));
+    const nms = [];
+    for (const box of candidates) {
+      if (!nms.some(k => iou(k, box) > 0.25)) nms.push(box);
+    }
+
+    // ── Step 4: Remove containers — boxes covered >50% by smaller boxes ───
+    function coveredFraction(big, smaller) {
+      const N = 20;
+      let cov = 0, tot = 0;
+      for (let i = 0; i <= N; i++) {
+        for (let j = 0; j <= N; j++) {
+          const px = big.x1 + (big.x2 - big.x1) * i / N;
+          const py = big.y1 + (big.y2 - big.y1) * j / N;
+          tot++;
+          if (smaller.some(s => px >= s.x1 && px <= s.x2 && py >= s.y1 && py <= s.y2)) cov++;
+        }
+      }
+      return cov / tot;
+    }
+    const rooms = nms.filter(box => {
+      const smaller = nms.filter(o => o !== box &&
+        (o.x2 - o.x1) * (o.y2 - o.y1) < (box.x2 - box.x1) * (box.y2 - box.y1));
+      return coveredFraction(box, smaller) < 0.50;
+    });
 
     // Sort top-to-bottom, left-to-right for consistent labelling
-    rooms.sort((a, b) => a.minY - b.minY || a.minX - b.minX);
+    rooms.sort((a, b) => a.y1 - b.y1 || a.x1 - b.x1);
+
+    // Convert normalised 0-1 coords back to pixel space for geo-mapping
+    const roomsAsPx = rooms.map(r => ({
+      minX: Math.round(r.x1 * width),
+      minY: Math.round(r.y1 * height),
+      maxX: Math.round(r.x2 * width),
+      maxY: Math.round(r.y2 * height),
+    }));
+
+    // Alias so the geo-mapping block below works unchanged
+    const roomBoxes = roomsAsPx;
 
     // Map pixel bounding box corners → geo-coordinates using bilinear interpolation
     const { topLeft, topRight, bottomRight, bottomLeft } = plan.corners;
@@ -947,7 +1051,7 @@ app.get("/api/plans/:id/detect-areas", async (req, res) => {
       return [lon, lat];
     };
 
-    const areas = rooms.map((box, i) => {
+    const areas = roomBoxes.map((box, i) => {
       const tl = pixelToGeo(box.minX, box.minY);
       const tr = pixelToGeo(box.maxX, box.minY);
       const br = pixelToGeo(box.maxX, box.maxY);
@@ -957,7 +1061,6 @@ app.get("/api/plans/:id/detect-areas", async (req, res) => {
         label: `Room ${i + 1}`,
         coords: [tl, tr, br, bl],
         pixelBounds: { minX: box.minX, minY: box.minY, maxX: box.maxX, maxY: box.maxY },
-        pixelCount: box.count,
       };
     });
 

@@ -97,5 +97,26 @@
     "calibrationMethod": "geopdf",
     "createdAt": "2026-03-04T19:32:00.646Z",
     "updatedAt": "2026-03-04T19:32:00.646Z"
+  },
+  {
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "name": "Market Street Tech Hub - Ground Floor",
+    "imagePath": "sf_plan.png",
+    "pdfPath": "sf_plan.pdf",
+    "corners": {
+      "topLeft":     [-122.4206, 37.77545],
+      "topRight":    [-122.4182, 37.77545],
+      "bottomRight": [-122.4182, 37.77435],
+      "bottomLeft":  [-122.4206, 37.77435]
+    },
+    "opacity": 0.85,
+    "rotation": 0,
+    "floor": "Ground",
+    "building": "Market Street Tech Hub",
+    "site": "101 Market St, San Francisco, CA 94105",
+    "crs": "EPSG:4326",
+    "calibrationMethod": "geopdf",
+    "createdAt": "2026-03-06T12:00:00.000Z",
+    "updatedAt": "2026-03-06T12:00:00.000Z"
   }
 ]
