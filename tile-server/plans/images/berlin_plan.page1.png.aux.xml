@@ -1,0 +1,14 @@
+<PAMDataset>
+  <Metadata>
+    <MDI key="AUTHOR">Plan Viewer System</MDI>
+    <MDI key="CREATION_DATE">D:20260304193048Z</MDI>
+    <MDI key="CREATOR">PDFKit</MDI>
+    <MDI key="KEYWORDS">GEO:CRS=EPSG:4326; GEO:TOPLEFT=13.413,52.5218; GEO:TOPRIGHT=13.4153,52.5218; GEO:BOTTOMRIGHT=13.4153,52.5211; GEO:BOTTOMLEFT=13.413,52.5211; GEO:FLOOR=Ground; GEO:BUILDING=Startup Hub - Ground Floor; GEO:SITE=Alexanderplatz 1, 10178 Berlin</MDI>
+    <MDI key="PRODUCER">PDFKit</MDI>
+    <MDI key="SUBJECT">Floor plan for Alexanderplatz 1, 10178 Berlin</MDI>
+    <MDI key="TITLE">Startup Hub - Ground Floor</MDI>
+  </Metadata>
+  <Metadata domain="IMAGE_STRUCTURE">
+    <MDI key="INTERLEAVE">PIXEL</MDI>
+  </Metadata>
+</PAMDataset>

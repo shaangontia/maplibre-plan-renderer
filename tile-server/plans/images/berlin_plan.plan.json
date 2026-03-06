@@ -1,0 +1,35 @@
+[
+  {
+    "id": "bd0387d1-84ae-443c-83fe-a47bf8b0c4c8",
+    "name": "Startup Hub - Ground Floor",
+    "imagePath": "berlin_plan.png",
+    "pdfPath": "berlin_plan.pdf",
+    "corners": {
+      "topLeft": [
+        13.413,
+        52.5218
+      ],
+      "topRight": [
+        13.4153,
+        52.5218
+      ],
+      "bottomRight": [
+        13.4153,
+        52.5211
+      ],
+      "bottomLeft": [
+        13.413,
+        52.5211
+      ]
+    },
+    "opacity": 0.85,
+    "rotation": 0,
+    "floor": "Ground",
+    "building": "Startup Hub - Ground Floor",
+    "site": "Alexanderplatz 1, 10178 Berlin",
+    "crs": "EPSG:4326",
+    "calibrationMethod": "geopdf",
+    "createdAt": "2026-03-06T08:04:05.404Z",
+    "updatedAt": "2026-03-06T08:04:05.404Z"
+  }
+]
