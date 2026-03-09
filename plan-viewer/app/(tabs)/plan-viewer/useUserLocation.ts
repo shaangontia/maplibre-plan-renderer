@@ -103,7 +103,9 @@ export function useUserLocation(): UseUserLocationResult {
     if (dir === "south")  latitude  -= step * LAT_PER_METER;
     if (dir === "east")   longitude += step * lonPerMeter;
     if (dir === "west")   longitude -= step * lonPerMeter;
-    setLoc({ longitude, latitude, accuracy: 3, heading: null });
+    const newLocation = { longitude, latitude, accuracy: 3, heading: null };
+    console.log(`📍 Simulated move ${dir}: [${longitude.toFixed(6)}, ${latitude.toFixed(6)}]`);
+    setLoc(newLocation);
   }, [setLoc]);
 
   return {
