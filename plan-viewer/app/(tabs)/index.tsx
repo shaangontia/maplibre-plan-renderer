@@ -17,6 +17,7 @@ import { useAnnotations } from "./plan-viewer/useAnnotations";
 import { useExportImport } from "./plan-viewer/useExportImport";
 import { useDetectAreas } from "./plan-viewer/useDetectAreas";
 import { useUserLocation } from "./plan-viewer/useUserLocation";
+import { useOrientation } from "./plan-viewer/useOrientation";
 import MapLayers from "./plan-viewer/MapLayers";
 import { ToolBar, DrawingBar } from "./plan-viewer/ToolBar";
 import PlanDropdown from "./plan-viewer/PlanDropdown";
@@ -30,6 +31,9 @@ export default function PlanViewerScreen() {
   const cameraRef = useRef<any>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapRef = useRef<any>(null);
+  const { orientation, isTablet } = useOrientation();
+  const isLandscape = orientation === "landscape";
+  const useCompactHeader = isLandscape || isTablet;
 
   const { planData, loading, activePlanId, setActivePlanId, activePlan, mapCenter } =
     usePlanData();
@@ -239,30 +243,60 @@ export default function PlanViewerScreen() {
 
   return (
     <SafeAreaView style={styles.root}>
-      {/* Header with plan dropdown */}
-      <View style={styles.header}>
-        <View style={styles.headerRow}>
-          <Text style={styles.title}>Plan Viewer</Text>
-          <View style={styles.headerActions}>
-            <TouchableOpacity style={styles.exportBtn} onPress={exportAnnotations}>
-              <Text style={styles.exportBtnText}>📤 Export</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.importBtn} onPress={importAnnotations}>
-              <Text style={styles.importBtnText}>📥 Import</Text>
-            </TouchableOpacity>
-            <Text style={styles.statsBadge}>
-              {defects.length}P {polygons.length}A {measurements.length}M
-            </Text>
+      {/* Header with plan dropdown — compact single row on tablet & landscape */}
+      <View style={useCompactHeader ? styles.headerLandscape : styles.header}>
+        {useCompactHeader ? (
+          <View style={styles.headerRowLandscape}>
+            <Text style={styles.titleLandscape}>Plan Viewer</Text>
+            <View style={styles.planDropdownLandscape}>
+              <PlanDropdown
+                planData={planData}
+                activePlanId={activePlanId}
+                activePlan={activePlan}
+                dropdownOpen={dropdownOpen}
+                setDropdownOpen={setDropdownOpen}
+                onSelectPlan={selectPlan}
+                compact
+              />
+            </View>
+            <View style={styles.headerActions}>
+              <TouchableOpacity style={styles.exportBtn} onPress={exportAnnotations}>
+                <Text style={styles.exportBtnText}>📤 Export</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.importBtn} onPress={importAnnotations}>
+                <Text style={styles.importBtnText}>📥 Import</Text>
+              </TouchableOpacity>
+              <Text style={styles.statsBadge}>
+                {defects.length}P {polygons.length}A {measurements.length}M
+              </Text>
+            </View>
           </View>
-        </View>
-        <PlanDropdown
-          planData={planData}
-          activePlanId={activePlanId}
-          activePlan={activePlan}
-          dropdownOpen={dropdownOpen}
-          setDropdownOpen={setDropdownOpen}
-          onSelectPlan={selectPlan}
-        />
+        ) : (
+          <>
+            <View style={styles.headerRow}>
+              <Text style={styles.title}>Plan Viewer</Text>
+              <View style={styles.headerActions}>
+                <TouchableOpacity style={styles.exportBtn} onPress={exportAnnotations}>
+                  <Text style={styles.exportBtnText}>📤 Export</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.importBtn} onPress={importAnnotations}>
+                  <Text style={styles.importBtnText}>📥 Import</Text>
+                </TouchableOpacity>
+                <Text style={styles.statsBadge}>
+                  {defects.length}P {polygons.length}A {measurements.length}M
+                </Text>
+              </View>
+            </View>
+            <PlanDropdown
+              planData={planData}
+              activePlanId={activePlanId}
+              activePlan={activePlan}
+              dropdownOpen={dropdownOpen}
+              setDropdownOpen={setDropdownOpen}
+              onSelectPlan={selectPlan}
+            />
+          </>
+        )}
       </View>
 
       {/* Tool mode selector */}
@@ -276,6 +310,7 @@ export default function PlanViewerScreen() {
         measurementsCount={measurements.length}
         onClearAll={clearAll}
         cancelDrawing={cancelDrawing}
+        isLandscape={useCompactHeader}
       />
 
       {/* Drawing controls */}
@@ -366,13 +401,13 @@ export default function PlanViewerScreen() {
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity style={styles.centerBtn} onPress={() => flyToPlan()}>
+        <TouchableOpacity style={isLandscape ? styles.centerBtnLandscape : styles.centerBtn} onPress={() => flyToPlan()}>
           <Text style={styles.centerBtnText}>Center</Text>
         </TouchableOpacity>
 
         {/* Location button — request permission or toggle follow mode */}
         <TouchableOpacity
-          style={[styles.locationBtn, following && styles.locationBtnActive]}
+          style={[isLandscape ? styles.locationBtnLandscape : styles.locationBtn, following && styles.locationBtnActive]}
           onPress={permissionGranted ? toggleFollowing : requestPermission}
         >
           <Text style={styles.locationBtnIcon}>{permissionGranted ? (following ? "📍" : "🔵") : "📍"}</Text>
@@ -383,7 +418,7 @@ export default function PlanViewerScreen() {
 
         {/* Simulate Location button — places dot at plan center */}
         <TouchableOpacity
-          style={[styles.simBtn, simMode && styles.simBtnActive]}
+          style={[isLandscape ? styles.simBtnLandscape : styles.simBtn, simMode && styles.simBtnActive]}
           onPress={() => {
             if (activePlan) {
               const c = activePlan.center as [number, number];
@@ -399,7 +434,7 @@ export default function PlanViewerScreen() {
 
         {/* D-pad — only visible in sim mode */}
         {simMode && (
-          <View style={styles.dpad}>
+          <View style={isLandscape ? styles.dpadLandscape : styles.dpad}>
             <TouchableOpacity style={styles.dpadBtn} onPress={() => moveSimulated("north")}>
               <Text style={styles.dpadText}>▲</Text>
             </TouchableOpacity>
@@ -421,7 +456,7 @@ export default function PlanViewerScreen() {
         {/* Area Navigation toggle — only shown on overview plans */}
         {linkedSheetPlans.length > 0 && (
           <TouchableOpacity
-            style={[styles.areaNavBtn, areaNavMode && styles.areaNavBtnActive]}
+            style={[isLandscape ? styles.areaNavBtnLandscape : styles.areaNavBtn, areaNavMode && styles.areaNavBtnActive]}
             onPress={() => setAreaNavMode((v) => !v)}
           >
             <Text style={styles.areaNavIcon}>🗺️</Text>
@@ -434,7 +469,7 @@ export default function PlanViewerScreen() {
         {/* Back to Overview — shown when viewing a detail sheet in area nav mode */}
         {areaNavMode && overviewPlan && (
           <TouchableOpacity
-            style={styles.backToOverviewBtn}
+            style={isLandscape ? styles.backToOverviewBtnLandscape : styles.backToOverviewBtn}
             onPress={() => selectPlan(overviewPlan)}
           >
             <Text style={styles.backToOverviewText}>⬅ Overview</Text>
@@ -443,7 +478,7 @@ export default function PlanViewerScreen() {
 
         {/* Detect Areas FAB */}
         <TouchableOpacity
-          style={[styles.detectBtn, detecting && styles.detectBtnBusy]}
+          style={[isLandscape ? styles.detectBtnLandscape : styles.detectBtn, detecting && styles.detectBtnBusy]}
           onPress={async () => {
             await detectAreas();
             setShowDetectedAreas(true);
@@ -497,8 +532,12 @@ const styles = StyleSheet.create({
   loadingText: { marginTop: 12, fontSize: 14, color: "#666" },
 
   header: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4 },
+  headerLandscape: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 2 },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  headerRowLandscape: { flexDirection: "row", alignItems: "center", gap: 12 },
   title: { fontSize: 18, fontWeight: "700", color: "#1a1a1a" },
+  titleLandscape: { fontSize: 14, fontWeight: "700", color: "#1a1a1a" },
+  planDropdownLandscape: { flex: 1 },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
   exportBtn: {
     backgroundColor: "#4CAF50", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6,
@@ -543,6 +582,11 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.7)",
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
   },
+  centerBtnLandscape: {
+    position: "absolute", left: 12, bottom: 12,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+  },
   centerBtnText: { color: "#fff", fontSize: 11, fontWeight: "600" },
 
   areaNavBtn: {
@@ -550,6 +594,13 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: 6,
     backgroundColor: "rgba(0,0,0,0.7)",
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
+    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 4, elevation: 4,
+  },
+  areaNavBtnLandscape: {
+    position: "absolute", left: 292, bottom: 12,
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
     shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 4, elevation: 4,
   },
   areaNavBtnActive: { backgroundColor: "#1565C0" },
@@ -563,6 +614,12 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.75)",
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
   },
+  backToOverviewBtnLandscape: {
+    position: "absolute", left: 420, bottom: 12,
+    flexDirection: "row", alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.75)",
+    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+  },
   backToOverviewText: { color: "#fff", fontSize: 12, fontWeight: "700" },
 
   simBtn: {
@@ -570,6 +627,13 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: 6,
     backgroundColor: "rgba(0,0,0,0.7)",
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
+    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 4, elevation: 4,
+  },
+  simBtnLandscape: {
+    position: "absolute", left: 162, bottom: 12,
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
     shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 4, elevation: 4,
   },
   simBtnActive: { backgroundColor: "#6A1B9A" },
@@ -580,6 +644,10 @@ const styles = StyleSheet.create({
   dpad: {
     position: "absolute", right: 12, bottom: 100,
     alignItems: "center", gap: 2,
+  },
+  dpadLandscape: {
+    position: "absolute", right: 60, bottom: 8,
+    alignItems: "center", gap: 1,
   },
   dpadMiddleRow: { flexDirection: "row", alignItems: "center", gap: 2 },
   dpadCenter: { width: 44, height: 44 },
@@ -597,6 +665,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
     shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 4, elevation: 4,
   },
+  locationBtnLandscape: {
+    position: "absolute", left: 88, bottom: 12,
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 4, elevation: 4,
+  },
   locationBtnActive: { backgroundColor: "#1565C0" },
   locationBtnIcon: { fontSize: 14 },
   locationBtnLabel: { color: "#fff", fontSize: 11, fontWeight: "600" },
@@ -607,6 +682,13 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: 6,
     backgroundColor: "#006064",
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
+    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 4, elevation: 4,
+  },
+  detectBtnLandscape: {
+    position: "absolute", left: 12, bottom: 42,
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: "#006064",
+    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
     shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 4, elevation: 4,
   },
   detectBtnBusy: { backgroundColor: "#455A64" },

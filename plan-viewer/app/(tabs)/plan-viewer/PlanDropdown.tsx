@@ -16,6 +16,7 @@ interface PlanDropdownProps {
   dropdownOpen: boolean;
   setDropdownOpen: (open: boolean) => void;
   onSelectPlan: (plan: PlanInfo) => void;
+  compact?: boolean;
 }
 
 export default function PlanDropdown({
@@ -25,6 +26,7 @@ export default function PlanDropdown({
   dropdownOpen,
   setDropdownOpen,
   onSelectPlan,
+  compact,
 }: PlanDropdownProps) {
   return (
     <>
@@ -41,7 +43,7 @@ export default function PlanDropdown({
         </TouchableOpacity>
       )}
 
-      {activePlan?.site && (
+      {!compact && activePlan?.site && (
         <Text style={styles.sub}>{activePlan.site}</Text>
       )}
 

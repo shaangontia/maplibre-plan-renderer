@@ -1,5 +1,5 @@
 import React from "react";
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import type { Severity, ToolMode } from "./types";
 import { SEVERITY_COLORS, SEVERITY_ORDER, TOOL_MODES } from "./constants";
 import { formatDistance, haversineDistance } from "./geoUtils";
@@ -15,6 +15,7 @@ interface ToolBarProps {
   measurementsCount: number;
   onClearAll: () => void;
   cancelDrawing: () => void;
+  isLandscape?: boolean;
 }
 
 export function ToolBar({
@@ -27,9 +28,10 @@ export function ToolBar({
   measurementsCount,
   onClearAll,
   cancelDrawing,
+  isLandscape,
 }: ToolBarProps) {
-  return (
-    <View style={styles.toolBar}>
+  const content = (
+    <>
       {TOOL_MODES.map((t) => (
         <TouchableOpacity
           key={t.key}
@@ -77,8 +79,23 @@ export function ToolBar({
           <Text style={styles.clearBtnText}>Clear</Text>
         </TouchableOpacity>
       )}
-    </View>
+    </>
   );
+
+  if (isLandscape) {
+    return (
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.toolBarLandscape}
+        style={styles.toolBarScrollContainer}
+      >
+        {content}
+      </ScrollView>
+    );
+  }
+
+  return <View style={styles.toolBar}>{content}</View>;
 }
 
 interface DrawingBarProps {
@@ -132,6 +149,14 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center",
     paddingHorizontal: 12, paddingVertical: 6, gap: 4,
     borderBottomWidth: 1, borderBottomColor: "#eee",
+  },
+  toolBarScrollContainer: {
+    flexGrow: 0,
+    borderBottomWidth: 1, borderBottomColor: "#eee",
+  },
+  toolBarLandscape: {
+    flexDirection: "row", alignItems: "center",
+    paddingHorizontal: 12, paddingVertical: 3, gap: 4,
   },
   toolBtn: {
     flexDirection: "row", alignItems: "center", gap: 3,

@@ -1,12 +1,15 @@
 {
   "name": "tile-server",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "version": "2.0.0",
+  "description": "Plan viewer tile server",
+  "main": "dist/index.js",
   "scripts": {
-    "start": "node index.js",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "start:legacy": "node index.js",
     "stop": "lsof -ti:8080 | xargs kill -9 2>/dev/null && echo 'Server stopped' || echo 'No server running on port 8080'",
-    "restart": "npm run stop && npm start",
+    "restart": "npm run stop && npm run dev",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -23,5 +26,13 @@
     "proj4": "^2.20.3",
     "sharp": "^0.34.5",
     "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.1.0",
+    "@types/node": "^25.4.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
   }
 }
