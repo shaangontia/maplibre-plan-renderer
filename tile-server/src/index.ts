@@ -1,3 +1,4 @@
+import "dotenv/config";
 import app from "./app";
 import { PORT } from "./config";
 import { readDb } from "./db/plans";
@@ -28,6 +29,9 @@ async function startServer(): Promise<void> {
     console.log(`  GET    /style.json?mode=normal|satellite`);
     console.log(`  POST   /api/plans/:id/calibrate — calibrate with control points`);
     console.log(`  GET    /plan-info          — all plans with bounds`);
+    console.log(`  GET    /mapillary/nearest  — find nearest Mapillary image`);
+    console.log(`  GET    /mapillary/image/:id — get Mapillary image metadata`);
+    console.log(`\nMapillary: ${process.env.MAPILLARY_CLIENT_TOKEN ? "token configured" : "NOT configured (set MAPILLARY_CLIENT_TOKEN)"}`);
   });
 }
 

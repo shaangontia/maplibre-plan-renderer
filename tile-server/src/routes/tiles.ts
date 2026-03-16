@@ -5,6 +5,7 @@ import { PORT } from "../config";
 import { readDb, getBounds, getCenter } from "../db/plans";
 
 const router = Router();
+const MAX_ZOOM = 19;
 
 // ---------------------------------------------------------------------------
 // Tile proxy helper
@@ -94,7 +95,7 @@ router.get("/style.json", (req: Request, res: Response) => {
         type: "raster",
         tiles: [`${baseUrl}/proxy/satellite/{z}/{x}/{y}`],
         tileSize: 256,
-        maxzoom: 19,
+        maxzoom: MAX_ZOOM,
         attribution: "Esri, Maxar, Earthstar Geographics",
       };
       basemapLayer = { id: "satellite", type: "raster", source: "basemap" };
@@ -103,7 +104,7 @@ router.get("/style.json", (req: Request, res: Response) => {
         type: "raster",
         tiles: [`${baseUrl}/proxy/osm/{z}/{x}/{y}.png`],
         tileSize: 256,
-        maxzoom: 19,
+        maxzoom: MAX_ZOOM,
         attribution: "&copy; OpenStreetMap contributors",
       };
       basemapLayer = { id: "osm", type: "raster", source: "basemap" };

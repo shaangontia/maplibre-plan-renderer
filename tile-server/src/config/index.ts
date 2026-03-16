@@ -24,3 +24,7 @@ export const ALLOWED_EXTENSIONS = [
 // Area detection working resolution
 export const DETECT_WORK_W = 1000;
 export const DETECT_WORK_H = 744;
+
+// Mapillary API
+export const MAPILLARY_CLIENT_TOKEN = process.env.MAPILLARY_CLIENT_TOKEN || "";
+export const MAPILLARY_API_BASE = "https://graph.mapillary.com";

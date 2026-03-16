@@ -22,6 +22,10 @@ import MapLayers from "./plan-viewer/MapLayers";
 import { ToolBar, DrawingBar } from "./plan-viewer/ToolBar";
 import PlanDropdown from "./plan-viewer/PlanDropdown";
 import { DefectInfoBar, PolygonList, MeasurementList, DetectedAreasList } from "./plan-viewer/BottomPanels";
+import { useMapillary } from "./plan-viewer/useMapillary";
+import { TILE_SERVER } from "./plan-viewer/constants";
+
+import MapillaryPane from "./plan-viewer/MapillaryPane";
 
 // ---------------------------------------------------------------------------
 // Component
@@ -93,6 +97,19 @@ export default function PlanViewerScreen() {
     startSim,
     moveSimulated,
   } = useUserLocation();
+
+  const mapillary = useMapillary();
+  const [mapillaryToken, setMapillaryToken] = useState("");
+  const [streetViewMode, setStreetViewMode] = useState(false);
+
+  // Fetch Mapillary token status from backend on mount
+  React.useEffect(() => {
+    // The token lives server-side; we just need to know if it's configured
+    // For the WebView, we fetch it from a lightweight endpoint or pass it via env
+    // For now, use the MAPILLARY_CLIENT_TOKEN from env if available
+    const token = process.env.EXPO_PUBLIC_MAPILLARY_TOKEN || "";
+    setMapillaryToken(token);
+  }, []);
 
   // ------ Callbacks ------
   const flyToPlan = useCallback(
@@ -210,6 +227,12 @@ export default function PlanViewerScreen() {
         } catch (_) { /* ignore query errors */ }
       }
 
+      // Street view mode: query Mapillary instead of normal annotation tools
+      if (streetViewMode) {
+        mapillary.findNearestImage(lon, lat);
+        return;
+      }
+
       if (toolMode === "pin") {
         addDefect(lon, lat);
       } else if (toolMode === "polygon") {
@@ -218,7 +241,7 @@ export default function PlanViewerScreen() {
         addMeasurement(coord);
       }
     },
-    [toolMode, areaNavMode, linkedSheetPlans, planData, selectPlan, addDefect, addDrawingPoint, addMeasurement]
+    [toolMode, areaNavMode, streetViewMode, linkedSheetPlans, planData, selectPlan, addDefect, addDrawingPoint, addMeasurement, mapillary]
   );
 
   // Status text
@@ -330,165 +353,224 @@ export default function PlanViewerScreen() {
         </View>
       )}
 
-      {/* Map */}
-      <View style={styles.mapContainer}>
-        <MapLibreGL.MapView
-          ref={mapRef}
-          style={styles.map}
-          mapStyle={getStyleUrl(mapMode, activePlanId ?? undefined)}
-          logoEnabled={false}
-          attributionEnabled={false}
-          onDidFinishLoadingMap={onMapReady}
-          onPress={handleMapPress}
-        >
-          <MapLibreGL.Camera
-            ref={cameraRef}
-            defaultSettings={{ centerCoordinate: mapCenter, zoomLevel: 18 }}
-            minZoomLevel={2}
-            maxZoomLevel={22}
-          />
+      {/* Map + Mapillary overlay */}
+      <View style={styles.splitContainer}>
+        {/* Map — always fills the container */}
+        <View style={styles.mapContainer}>
+          <MapLibreGL.MapView
+            ref={mapRef}
+            style={styles.map}
+            mapStyle={getStyleUrl(mapMode, activePlanId ?? undefined)}
+            logoEnabled={false}
+            attributionEnabled={false}
+            onDidFinishLoadingMap={onMapReady}
+            onPress={handleMapPress}
+          >
+            <MapLibreGL.Camera
+              ref={cameraRef}
+              defaultSettings={{ centerCoordinate: mapCenter, zoomLevel: 18 }}
+              minZoomLevel={2}
+              maxZoomLevel={22}
+            />
 
-          <MapLayers
-            defects={defects}
-            polygons={polygons}
-            measurements={measurements}
-            drawingCoords={drawingCoords}
-            measureStart={measureStart}
-            detectedAreas={detectedAreas}
-            userLocation={userLocation}
-            linkedSheetPlans={linkedSheetPlans}
-            areaNavMode={areaNavMode}
-            onPinPress={handlePinPress}
-            onClusterPress={handleClusterPress}
-            onSheetPress={handleSheetPress}
-          />
-        </MapLibreGL.MapView>
+            <MapLayers
+              defects={defects}
+              polygons={polygons}
+              measurements={measurements}
+              drawingCoords={drawingCoords}
+              measureStart={measureStart}
+              detectedAreas={detectedAreas}
+              userLocation={userLocation}
+              linkedSheetPlans={linkedSheetPlans}
+              areaNavMode={areaNavMode}
+              onPinPress={handlePinPress}
+              onClusterPress={handleClusterPress}
+              onSheetPress={handleSheetPress}
+            />
 
-        {/* Map mode toggle */}
-        <View style={styles.mapToggle}>
-          {(["normal", "satellite", "canvas"] as MapMode[]).map((m) => (
+            {/* Mapillary image position marker */}
+            {mapillary.currentImagePosition && (
+              <MapLibreGL.PointAnnotation
+                id="mapillary-marker"
+                coordinate={[mapillary.currentImagePosition.lng, mapillary.currentImagePosition.lat]}
+              >
+                <View style={styles.mapillaryMarker}>
+                  <View style={styles.mapillaryMarkerInner} />
+                </View>
+              </MapLibreGL.PointAnnotation>
+            )}
+          </MapLibreGL.MapView>
+
+          {/* Map mode toggle */}
+          <View style={styles.mapToggle}>
+            {(["normal", "satellite", "canvas"] as MapMode[]).map((m) => (
+              <TouchableOpacity
+                key={m}
+                style={[styles.toggleBtn, mapMode === m && styles.toggleBtnActive]}
+                onPress={() => setMapMode(m)}
+              >
+                <Text style={[styles.toggleBtnText, mapMode === m && styles.toggleBtnTextActive]}>
+                  {m === "normal" ? "Map" : m === "satellite" ? "Satellite" : "Canvas"}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* Zoom controls */}
+          <View style={styles.zoomControls}>
             <TouchableOpacity
-              key={m}
-              style={[styles.toggleBtn, mapMode === m && styles.toggleBtnActive]}
-              onPress={() => setMapMode(m)}
+              style={styles.zoomBtn}
+              onPress={async () => {
+                const z = await mapRef.current?.getZoom();
+                if (z != null) cameraRef.current?.zoomTo(Math.min(z + 1, 22), 200);
+              }}
             >
-              <Text style={[styles.toggleBtnText, mapMode === m && styles.toggleBtnTextActive]}>
-                {m === "normal" ? "Map" : m === "satellite" ? "Satellite" : "Canvas"}
-              </Text>
+              <Text style={styles.zoomBtnText}>+</Text>
             </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Zoom controls */}
-        <View style={styles.zoomControls}>
-          <TouchableOpacity
-            style={styles.zoomBtn}
-            onPress={async () => {
-              const z = await mapRef.current?.getZoom();
-              if (z != null) cameraRef.current?.zoomTo(Math.min(z + 1, 22), 200);
-            }}
-          >
-            <Text style={styles.zoomBtnText}>+</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.zoomBtn}
-            onPress={async () => {
-              const z = await mapRef.current?.getZoom();
-              if (z != null) cameraRef.current?.zoomTo(Math.max(z - 1, 2), 200);
-            }}
-          >
-            <Text style={styles.zoomBtnText}>{"\u2212"}</Text>
-          </TouchableOpacity>
-        </View>
-
-        <TouchableOpacity style={isLandscape ? styles.centerBtnLandscape : styles.centerBtn} onPress={() => flyToPlan()}>
-          <Text style={styles.centerBtnText}>Center</Text>
-        </TouchableOpacity>
-
-        {/* Location button — request permission or toggle follow mode */}
-        <TouchableOpacity
-          style={[isLandscape ? styles.locationBtnLandscape : styles.locationBtn, following && styles.locationBtnActive]}
-          onPress={permissionGranted ? toggleFollowing : requestPermission}
-        >
-          <Text style={styles.locationBtnIcon}>{permissionGranted ? (following ? "📍" : "🔵") : "📍"}</Text>
-          <Text style={[styles.locationBtnLabel, following && styles.locationBtnLabelActive]}>
-            {!permissionGranted ? "Enable Location" : following ? "Following" : "My Location"}
-          </Text>
-        </TouchableOpacity>
-
-        {/* Simulate Location button — places dot at plan center */}
-        <TouchableOpacity
-          style={[isLandscape ? styles.simBtnLandscape : styles.simBtn, simMode && styles.simBtnActive]}
-          onPress={() => {
-            if (activePlan) {
-              const c = activePlan.center as [number, number];
-              startSim(c[0], c[1]);
-            }
-          }}
-        >
-          <Text style={styles.simBtnIcon}>🎮</Text>
-          <Text style={[styles.simBtnLabel, simMode && styles.simBtnLabelActive]}>
-            {simMode ? "Simulating" : "Simulate"}
-          </Text>
-        </TouchableOpacity>
-
-        {/* D-pad — only visible in sim mode */}
-        {simMode && (
-          <View style={isLandscape ? styles.dpadLandscape : styles.dpad}>
-            <TouchableOpacity style={styles.dpadBtn} onPress={() => moveSimulated("north")}>
-              <Text style={styles.dpadText}>▲</Text>
-            </TouchableOpacity>
-            <View style={styles.dpadMiddleRow}>
-              <TouchableOpacity style={styles.dpadBtn} onPress={() => moveSimulated("west")}>
-                <Text style={styles.dpadText}>◀</Text>
-              </TouchableOpacity>
-              <View style={styles.dpadCenter} />
-              <TouchableOpacity style={styles.dpadBtn} onPress={() => moveSimulated("east")}>
-                <Text style={styles.dpadText}>▶</Text>
-              </TouchableOpacity>
-            </View>
-            <TouchableOpacity style={styles.dpadBtn} onPress={() => moveSimulated("south")}>
-              <Text style={styles.dpadText}>▼</Text>
+            <TouchableOpacity
+              style={styles.zoomBtn}
+              onPress={async () => {
+                const z = await mapRef.current?.getZoom();
+                if (z != null) cameraRef.current?.zoomTo(Math.max(z - 1, 2), 200);
+              }}
+            >
+              <Text style={styles.zoomBtnText}>{"\u2212"}</Text>
             </TouchableOpacity>
           </View>
-        )}
 
-        {/* Area Navigation toggle — only shown on overview plans */}
-        {linkedSheetPlans.length > 0 && (
+          <TouchableOpacity style={isLandscape ? styles.centerBtnLandscape : styles.centerBtn} onPress={() => flyToPlan()}>
+            <Text style={styles.centerBtnText}>Center</Text>
+          </TouchableOpacity>
+
+          {/* Location button — request permission or toggle follow mode */}
           <TouchableOpacity
-            style={[isLandscape ? styles.areaNavBtnLandscape : styles.areaNavBtn, areaNavMode && styles.areaNavBtnActive]}
-            onPress={() => setAreaNavMode((v) => !v)}
+            style={[isLandscape ? styles.locationBtnLandscape : styles.locationBtn, following && styles.locationBtnActive]}
+            onPress={permissionGranted ? toggleFollowing : requestPermission}
           >
-            <Text style={styles.areaNavIcon}>🗺️</Text>
-            <Text style={[styles.areaNavLabel, areaNavMode && styles.areaNavLabelActive]}>
-              {areaNavMode ? "Area Nav ON" : "Area Nav"}
+            <Text style={styles.locationBtnIcon}>{permissionGranted ? (following ? "📍" : "🔵") : "📍"}</Text>
+            <Text style={[styles.locationBtnLabel, following && styles.locationBtnLabelActive]}>
+              {!permissionGranted ? "Enable Location" : following ? "Following" : "My Location"}
             </Text>
           </TouchableOpacity>
-        )}
 
-        {/* Back to Overview — shown when viewing a detail sheet in area nav mode */}
-        {areaNavMode && overviewPlan && (
+          {/* Simulate Location button — places dot at plan center */}
           <TouchableOpacity
-            style={isLandscape ? styles.backToOverviewBtnLandscape : styles.backToOverviewBtn}
-            onPress={() => selectPlan(overviewPlan)}
+            style={[isLandscape ? styles.simBtnLandscape : styles.simBtn, simMode && styles.simBtnActive]}
+            onPress={() => {
+              if (activePlan) {
+                const c = activePlan.center as [number, number];
+                startSim(c[0], c[1]);
+              }
+            }}
           >
-            <Text style={styles.backToOverviewText}>⬅ Overview</Text>
+            <Text style={styles.simBtnIcon}>🎮</Text>
+            <Text style={[styles.simBtnLabel, simMode && styles.simBtnLabelActive]}>
+              {simMode ? "Simulating" : "Simulate"}
+            </Text>
           </TouchableOpacity>
-        )}
 
-        {/* Detect Areas FAB */}
-        <TouchableOpacity
-          style={[isLandscape ? styles.detectBtnLandscape : styles.detectBtn, detecting && styles.detectBtnBusy]}
-          onPress={async () => {
-            await detectAreas();
-            setShowDetectedAreas(true);
-          }}
-          disabled={detecting}
-        >
-          <Text style={styles.detectBtnText}>{detecting ? "⏳" : "🔍"}</Text>
-          <Text style={styles.detectBtnLabel}>{detecting ? "Detecting…" : "Detect Areas"}</Text>
-        </TouchableOpacity>
+          {/* D-pad — only visible in sim mode */}
+          {simMode && (
+            <View style={isLandscape ? styles.dpadLandscape : styles.dpad}>
+              <TouchableOpacity style={styles.dpadBtn} onPress={() => moveSimulated("north")}>
+                <Text style={styles.dpadText}>▲</Text>
+              </TouchableOpacity>
+              <View style={styles.dpadMiddleRow}>
+                <TouchableOpacity style={styles.dpadBtn} onPress={() => moveSimulated("west")}>
+                  <Text style={styles.dpadText}>◀</Text>
+                </TouchableOpacity>
+                <View style={styles.dpadCenter} />
+                <TouchableOpacity style={styles.dpadBtn} onPress={() => moveSimulated("east")}>
+                  <Text style={styles.dpadText}>▶</Text>
+                </TouchableOpacity>
+              </View>
+              <TouchableOpacity style={styles.dpadBtn} onPress={() => moveSimulated("south")}>
+                <Text style={styles.dpadText}>▼</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Area Navigation toggle — only shown on overview plans */}
+          {linkedSheetPlans.length > 0 && (
+            <TouchableOpacity
+              style={[isLandscape ? styles.areaNavBtnLandscape : styles.areaNavBtn, areaNavMode && styles.areaNavBtnActive]}
+              onPress={() => setAreaNavMode((v) => !v)}
+            >
+              <Text style={styles.areaNavIcon}>🗺️</Text>
+              <Text style={[styles.areaNavLabel, areaNavMode && styles.areaNavLabelActive]}>
+                {areaNavMode ? "Area Nav ON" : "Area Nav"}
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Back to Overview — shown when viewing a detail sheet in area nav mode */}
+          {areaNavMode && overviewPlan && (
+            <TouchableOpacity
+              style={isLandscape ? styles.backToOverviewBtnLandscape : styles.backToOverviewBtn}
+              onPress={() => selectPlan(overviewPlan)}
+            >
+              <Text style={styles.backToOverviewText}>⬅ Overview</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Detect Areas FAB */}
+          <TouchableOpacity
+            style={[isLandscape ? styles.detectBtnLandscape : styles.detectBtn, detecting && styles.detectBtnBusy]}
+            onPress={async () => {
+              await detectAreas();
+              setShowDetectedAreas(true);
+            }}
+            disabled={detecting}
+          >
+            <Text style={styles.detectBtnText}>{detecting ? "⏳" : "🔍"}</Text>
+            <Text style={styles.detectBtnLabel}>{detecting ? "Detecting…" : "Detect Areas"}</Text>
+          </TouchableOpacity>
+
+          {/* Street View toggle — only in map/satellite modes (not canvas) */}
+          {mapMode !== "canvas" && (
+            <TouchableOpacity
+              style={[
+                isLandscape ? styles.streetViewBtnLandscape : styles.streetViewBtn,
+                streetViewMode && styles.streetViewBtnActive,
+              ]}
+              onPress={() => {
+                const next = !streetViewMode;
+                setStreetViewMode(next);
+                if (!next) mapillary.hidePane();
+              }}
+            >
+              <Text style={styles.streetViewIcon}>🔭</Text>
+              <Text style={[styles.streetViewLabel, streetViewMode && styles.streetViewLabelActive]}>
+                {streetViewMode ? "Street View ON" : "Street View"}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
       </View>
+
+      {/* Mapillary overlay pane — rendered outside the map container to avoid Fabric recycler issues */}
+      {mapillary.paneVisible && (
+        <View style={[
+          styles.mapillaryOverlay,
+          isLandscape ? styles.mapillaryOverlayLandscape : styles.mapillaryOverlayPortrait,
+        ]}>
+          <MapillaryPane
+            visible={mapillary.paneVisible}
+            loading={mapillary.loading}
+            error={mapillary.error}
+            currentImageId={mapillary.currentImageId}
+            currentImagePosition={mapillary.currentImagePosition}
+            currentCompassAngle={mapillary.currentCompassAngle}
+            nearbyCandidates={mapillary.nearbyCandidates}
+            onNavigateToImage={mapillary.navigateToImage}
+            onClose={() => {
+              mapillary.hidePane();
+              setStreetViewMode(false);
+            }}
+          />
+        </View>
+      )}
 
       {/* Bottom panels */}
       {selectedDefect && (
@@ -694,4 +776,61 @@ const styles = StyleSheet.create({
   detectBtnBusy: { backgroundColor: "#455A64" },
   detectBtnText: { fontSize: 14 },
   detectBtnLabel: { color: "#fff", fontSize: 11, fontWeight: "700" },
+
+  // Map container — always fills available space
+  splitContainer: { flex: 1 },
+
+  // Mapillary overlay — absolutely positioned on top of content
+  mapillaryOverlay: {
+    position: "absolute",
+    backgroundColor: "#1a1a1a",
+    borderColor: "#333",
+    shadowColor: "#000",
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 8,
+    zIndex: 100,
+  },
+  mapillaryOverlayPortrait: {
+    left: 0, right: 0, bottom: 0,
+    height: "45%",
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  mapillaryOverlayLandscape: {
+    top: 0, right: 0, bottom: 0,
+    width: "40%",
+    borderLeftWidth: StyleSheet.hairlineWidth,
+  },
+
+  // Mapillary image marker on the map
+  mapillaryMarker: {
+    width: 24, height: 24, borderRadius: 12,
+    backgroundColor: "rgba(76, 175, 80, 0.3)",
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 2, borderColor: "#4CAF50",
+  },
+  mapillaryMarkerInner: {
+    width: 10, height: 10, borderRadius: 5,
+    backgroundColor: "#4CAF50",
+  },
+
+  // Street View toggle button
+  streetViewBtn: {
+    position: "absolute", left: 12, bottom: 292,
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
+    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 4, elevation: 4,
+  },
+  streetViewBtnLandscape: {
+    position: "absolute", left: 540, bottom: 12,
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 4, elevation: 4,
+  },
+  streetViewBtnActive: { backgroundColor: "#2E7D32" },
+  streetViewIcon: { fontSize: 14 },
+  streetViewLabel: { color: "#fff", fontSize: 11, fontWeight: "600" },
+  streetViewLabelActive: { color: "#C8E6C9" },
 });

@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Mapillary Viewer</title>
+  <link rel="stylesheet" href="https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.css" />
+  <script src="https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a1a; }
+    #viewer { width: 100%; height: 100%; }
+    #placeholder {
+      display: flex; align-items: center; justify-content: center;
+      width: 100%; height: 100%;
+      color: #999; font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 14px; text-align: center; padding: 20px;
+    }
+    #placeholder.hidden { display: none; }
+    #viewer.hidden { display: none; }
+    #error-banner {
+      display: none; position: absolute; bottom: 0; left: 0; right: 0;
+      background: #c62828; color: #fff; padding: 8px 12px;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 12px;
+      text-align: center; z-index: 100;
+    }
+  </style>
+</head>
+<body>
+  <div id="placeholder">Tap a point on the map to load street-level imagery</div>
+  <div id="viewer" class="hidden"></div>
+  <div id="error-banner"></div>
+
+  <script>
+    // --- State ---
+    let viewer = null;
+    let clientToken = null;
+    let currentImageId = null;
+
+    const placeholderEl = document.getElementById("placeholder");
+    const viewerEl = document.getElementById("viewer");
+    const errorEl = document.getElementById("error-banner");
+
+    // --- Communicate with React Native ---
+    function sendToRN(type, payload) {
+      const msg = JSON.stringify({ type, ...payload });
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(msg);
+      }
+    }
+
+    function showError(msg) {
+      errorEl.textContent = msg;
+      errorEl.style.display = "block";
+      setTimeout(() => { errorEl.style.display = "none"; }, 4000);
+    }
+
+    function showPlaceholder(text) {
+      placeholderEl.textContent = text || "Tap a point on the map to load street-level imagery";
+      placeholderEl.classList.remove("hidden");
+      viewerEl.classList.add("hidden");
+    }
+
+    function showViewer() {
+      placeholderEl.classList.add("hidden");
+      viewerEl.classList.remove("hidden");
+    }
+
+    // --- Initialize viewer ---
+    function initViewer(token) {
+      if (viewer) return;
+      clientToken = token;
+      viewer = new mapillary.Viewer({
+        accessToken: token,
+        container: "viewer",
+        component: {
+          cover: false,
+          bearing: { size: mapillary.ComponentSize.Small },
+          sequence: { visible: true },
+          zoom: { size: mapillary.ComponentSize.Small },
+        },
+      });
+
+      // When the user navigates to a different image inside MapillaryJS
+      viewer.on("image", function (event) {
+        const img = event.image;
+        if (img && img.id !== currentImageId) {
+          currentImageId = img.id;
+          const lngLat = img.lngLat;
+          sendToRN("imageChanged", {
+            imageId: img.id,
+            lng: lngLat.lng,
+            lat: lngLat.lat,
+            compassAngle: img.compassAngle,
+          });
+        }
+      });
+
+      viewer.on("load", function () {
+        sendToRN("viewerReady", {});
+      });
+    }
+
+    // --- Navigate to image ---
+    function navigateToImage(imageId) {
+      if (!viewer) {
+        showError("Viewer not initialized");
+        return;
+      }
+      if (imageId === currentImageId) return;
+
+      showViewer();
+      currentImageId = imageId;
+      viewer.moveTo(imageId).catch(function (err) {
+        showError("Could not load image: " + err.message);
+        sendToRN("error", { message: err.message });
+      });
+    }
+
+    // --- Handle messages from React Native ---
+    function handleMessage(event) {
+      let data;
+      try {
+        data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+      } catch (e) {
+        return;
+      }
+
+      switch (data.type) {
+        case "init":
+          initViewer(data.accessToken);
+          break;
+
+        case "navigateTo":
+          if (data.imageId) {
+            navigateToImage(data.imageId);
+          }
+          break;
+
+        case "showPlaceholder":
+          showPlaceholder(data.text);
+          break;
+
+        case "resize":
+          if (viewer) viewer.resize();
+          break;
+      }
+    }
+
+    // Listen for messages from React Native
+    window.addEventListener("message", handleMessage);
+    document.addEventListener("message", handleMessage); // Android compat
+
+    // Signal that the page is loaded
+    sendToRN("htmlReady", {});
+  </script>
+</body>
+</html>
